@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String           @id @default(uuid())
+  username     String           @unique
+  passwordHash String
+  displayName  String           @default("Alex")
+  avatarUrl    String?          @default("/generated/avatar-alex.svg")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  books        Book[]
+  words        VocabularyWord[]
+  notes        Note[]
+  sessions     ReadingSession[]
+  settings     UserSetting?
+}
+
+model Book {
+  id          String    @id @default(uuid())
+  userId      String
+  title       String
+  author      String
+  coverUrl    String
+  level       String?
+  category    String?
+  description String?
+  status      String    @default("reading")
+  totalPages  Int       @default(0)
+  currentPage Int       @default(0)
+  rating      Int?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  lastReadAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapters    Chapter[]
+
+  @@index([userId, status])
+}
+
+model Chapter {
+  id        String     @id @default(uuid())
+  bookId    String
+  title     String
+  order     Int
+  book      Book       @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  sentences Sentence[]
+
+  @@unique([bookId, order])
+}
+
+model Sentence {
+  id        String   @id @default(uuid())
+  chapterId String
+  order     Int
+  english   String
+  chinese   String
+  chapter   Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([chapterId, order])
+}
+
+model VocabularyWord {
+  id            String   @id @default(uuid())
+  userId        String
+  word          String
+  phonetic      String?
+  meaning       String
+  sentence      String?
+  chapterTitle  String?
+  familiarity   Int      @default(1)
+  reviewCount   Int      @default(0)
+  mastered      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  nextReviewAt  DateTime?
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, word])
+  @@index([userId, mastered])
+}
+
+model Note {
+  id         String   @id @default(uuid())
+  userId     String
+  bookId     String?
+  title      String
+  content    String
+  tags       String[]
+  pinned     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, pinned])
+}
+
+model ReadingSession {
+  id            String   @id @default(uuid())
+  userId        String
+  bookId        String?
+  date          DateTime
+  durationMin   Int
+  sentencesRead Int      @default(0)
+  wordsLearned  Int      @default(0)
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model UserSetting {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  dailyGoalMinutes  Int      @default(30)
+  weeklyGoalDays    Int      @default(5)
+  preferredFontSize Int      @default(18)
+  preferredTheme    String   @default("sepia")
+  reminderEnabled   Boolean  @default(true)
+  reminderTime      String   @default("20:30")
+  language          String   @default("zh-CN")
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

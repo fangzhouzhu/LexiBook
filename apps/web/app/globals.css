@@ -1,0 +1,316 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f7f1e6;
+  --bg-soft: #fcf8f1;
+  --surface: rgba(255, 252, 247, 0.88);
+  --surface-strong: #fffdf9;
+  --surface-dark: #3f2a1f;
+  --border: rgba(143, 113, 78, 0.14);
+  --border-strong: rgba(143, 113, 78, 0.22);
+  --text: #2f2318;
+  --text-soft: #7b6957;
+  --accent: #a06d31;
+  --accent-deep: #7a4d24;
+  --shadow-soft: 0 18px 40px rgba(69, 45, 24, 0.05);
+  --shadow-card: 0 10px 24px rgba(69, 45, 24, 0.05);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.7), transparent 28%),
+    linear-gradient(180deg, #faf5ed 0%, #f5eee2 100%);
+  font-family: "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.font-display {
+  font-family: "Iowan Old Style", "Baskerville", "Palatino Linotype", "Source Han Serif SC", "Noto Serif SC", serif;
+}
+
+.glass-card {
+  background: linear-gradient(180deg, rgba(255, 253, 249, 0.9) 0%, rgba(255, 250, 244, 0.82) 100%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(14px);
+}
+
+.auth-page-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at top right, rgba(214, 180, 132, 0.22), transparent 22%),
+    radial-gradient(circle at bottom left, rgba(164, 106, 61, 0.14), transparent 28%),
+    linear-gradient(180deg, #f7f1e8 0%, #efe6d8 100%);
+}
+
+.auth-book {
+  width: min(1120px, 100%);
+  min-height: min(760px, calc(100vh - 64px));
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) 1fr;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  background:
+    linear-gradient(135deg, rgba(255, 251, 245, 0.95) 0%, rgba(248, 239, 226, 0.88) 58%, rgba(230, 203, 166, 0.76) 100%);
+  box-shadow: 0 30px 70px rgba(55, 35, 18, 0.14);
+}
+
+.auth-book::before {
+  content: "";
+  background:
+    linear-gradient(180deg, rgba(102, 66, 34, 0.22), rgba(102, 66, 34, 0.12)),
+    url("/generated/hero-open-book.svg") center/cover no-repeat;
+}
+
+.auth-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 56px 52px;
+  background: rgba(255, 252, 247, 0.78);
+  backdrop-filter: blur(18px);
+}
+
+.auth-title {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", "Source Han Serif SC", "Noto Serif SC", serif;
+  font-size: 48px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: #2f2318;
+}
+
+.auth-subtitle {
+  margin: 16px 0 32px;
+  color: #7b6854;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-label {
+  margin-top: 8px;
+  color: #544334;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.auth-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  border: 1px solid rgba(138, 108, 80, 0.18);
+  border-radius: 18px;
+  padding: 0 16px;
+  color: #30261d;
+  background: rgba(255, 250, 243, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.auth-input-wrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: #2f241a;
+  background: transparent;
+}
+
+.auth-input-wrap input::placeholder {
+  color: #aa9989;
+}
+
+.auth-eye-btn {
+  border: none;
+  background: transparent;
+  color: #6d6153;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.auth-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #5e5347;
+}
+
+.auth-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.auth-link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.auth-submit {
+  margin-top: 18px;
+  min-height: 54px;
+  border: none;
+  border-radius: 18px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #f8f1e7;
+  cursor: pointer;
+  background: linear-gradient(135deg, #6c4521 0%, #9c6a2f 52%, #c18a47 100%);
+  box-shadow: 0 14px 24px rgba(108, 69, 33, 0.22);
+}
+
+.auth-submit:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.auth-error {
+  margin: 2px 0 0;
+  color: #b0352e;
+  font-size: 13px;
+}
+
+.auth-divider {
+  margin-top: 34px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.auth-divider span {
+  flex: 1;
+  height: 1px;
+  background: rgba(120, 101, 84, 0.18);
+}
+
+.auth-divider p {
+  margin: 0;
+  font-size: 14px;
+  color: #74695c;
+  white-space: nowrap;
+}
+
+.auth-divider a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (max-width: 960px) {
+  .auth-book {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-book::before {
+    min-height: 220px;
+  }
+
+  .auth-card {
+    padding: 40px 28px 34px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-page-bg {
+    padding: 16px;
+  }
+
+  .auth-title {
+    font-size: 36px;
+  }
+
+  .auth-subtitle {
+    font-size: 14px;
+  }
+}
+
+.reader-slider {
+  height: 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: rgba(250, 243, 233, 0.26);
+}
+
+.reader-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f2eadf 0%, #d4c0a7 100%);
+}
+
+.reader-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 2px solid rgba(150, 112, 71, 0.35);
+  border-radius: 999px;
+  background: #f4e6d4;
+  box-shadow: 0 2px 8px rgba(44, 27, 16, 0.2);
+}
+
+.reader-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f2eadf 0%, #d4c0a7 100%);
+}
+
+.reader-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(150, 112, 71, 0.35);
+  border-radius: 999px;
+  background: #f4e6d4;
+  box-shadow: 0 2px 8px rgba(44, 27, 16, 0.2);
+}
