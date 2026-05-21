@@ -26,8 +26,22 @@ export async function saveReadingProgress(payload: {
     body: JSON.stringify(payload)
   });
   if (!res.ok) {
-    throw new Error("保存阅读进度失败，请先登录");
+    throw new Error("保存阅读进度失败");
   }
+}
+
+export async function getReadingProgress(chapterId: string): Promise<{ sentenceId: string | null; percent: number }> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/progress/reading/${chapterId}`, {
+    cache: "no-store",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
+  });
+  if (!res.ok) {
+    return { sentenceId: null, percent: 0 };
+  }
+  return res.json();
 }
 
 export async function getBookMarkdownRaw(bookId: string): Promise<string> {

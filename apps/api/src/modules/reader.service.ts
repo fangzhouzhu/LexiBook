@@ -72,13 +72,54 @@ export class ReaderService {
     };
   }
 
-  saveProgress(chapterId: string, sentenceId: string, percent: number) {
-    this.progress.set(chapterId, { sentenceId, percent });
+  async saveProgress(chapterId: string, sentenceId: string, percent: number) {
+    await this.lexiService.ensureSeedData();
+    const chapter = await this.prisma.chapter.findUnique({
+      where: { id: chapterId },
+      include: { book: true }
+    });
+    if (!chapter) {
+      this.progress.set(chapterId, { sentenceId, percent });
+      return { ok: true };
+    }
+
+    const normalizedPercent = Math.min(100, Math.max(0, Math.round(percent)));
+    const currentPage = Math.min(
+      chapter.book.totalPages,
+      Math.max(0, Math.round((chapter.book.totalPages * normalizedPercent) / 100))
+    );
+    await this.prisma.book.update({
+      where: { id: chapter.bookId },
+      data: {
+        currentPage,
+        currentChapterId: chapterId,
+        currentSentenceId: sentenceId,
+        progressPercent: normalizedPercent,
+        status: normalizedPercent >= 100 ? "finished" : "reading",
+        lastReadAt: new Date(),
+        startedAt: chapter.book.startedAt ?? new Date(),
+        finishedAt: normalizedPercent >= 100 ? new Date() : chapter.book.finishedAt
+      }
+    });
+    await this.recordReadingTouch(chapter.book.userId, chapter.bookId);
+    this.progress.set(chapterId, { sentenceId, percent: normalizedPercent });
     return { ok: true };
   }
 
-  getProgress(chapterId: string) {
-    return this.progress.get(chapterId) ?? { sentenceId: null, percent: 0 };
+  async getProgress(chapterId: string) {
+    await this.lexiService.ensureSeedData();
+    const chapter = await this.prisma.chapter.findUnique({
+      where: { id: chapterId },
+      include: { book: true }
+    });
+    if (!chapter) {
+      return this.progress.get(chapterId) ?? { sentenceId: null, percent: 0 };
+    }
+    return {
+      sentenceId: chapter.book.currentSentenceId,
+      chapterId: chapter.book.currentChapterId ?? chapterId,
+      percent: chapter.book.progressPercent
+    };
   }
 
   async translateBatch(texts: string[]) {
@@ -119,5 +160,38 @@ export class ReaderService {
     } finally {
       this.warmingChapters.delete(chapterId);
     }
+  }
+
+  private getLocalDayRange(date = new Date()) {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
+  private async recordReadingTouch(userId: string, bookId: string) {
+    const { start, end } = this.getLocalDayRange();
+    const session = await this.prisma.readingSession.findFirst({
+      where: { userId, bookId, date: { gte: start, lt: end } },
+      orderBy: { date: "desc" }
+    });
+    if (session) {
+      await this.prisma.readingSession.update({
+        where: { id: session.id },
+        data: { sentencesRead: { increment: 1 }, durationMin: { increment: 1 } }
+      });
+      return;
+    }
+    await this.prisma.readingSession.create({
+      data: {
+        userId,
+        bookId,
+        date: new Date(),
+        durationMin: 1,
+        sentencesRead: 1,
+        wordsLearned: 0
+      }
+    });
   }
 }

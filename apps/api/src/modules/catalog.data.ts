@@ -174,5 +174,80 @@ export const CATALOG_BOOKS: CatalogBook[] = [
         ]
       }
     ]
+  },
+  {
+    id: "the-time-machine",
+    title: "The Time Machine",
+    author: "H. G. Wells",
+    coverUrl: "https://covers.openlibrary.org/b/id/8231856-L.jpg",
+    category: "科幻冒险",
+    level: "B1",
+    description: "短小但想象力锋利的时间旅行经典，节奏快，适合做沉浸式精读。",
+    totalPages: 160,
+    initialStatus: "wishlist",
+    initialCurrentPage: 0,
+    chapters: [
+      {
+        order: 1,
+        title: "Introduction",
+        sentences: [
+          { order: 1, english: "The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us.", chinese: "那位时间旅行者（我们不妨这样称呼他）正在向我们阐述一个深奥的问题。" },
+          { order: 2, english: "His pale grey eyes shone and twinkled, and his usually pale face was flushed and animated.", chinese: "他浅灰色的眼睛闪闪发亮，平日苍白的脸也因兴奋而泛红。" },
+          { order: 3, english: "The fire burnt brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.", chinese: "炉火明亮地燃烧着，银色百合灯中柔和的白炽光映住了杯中一闪而过的气泡。" },
+          { order: 4, english: "Our chairs, being his patents, embraced and caressed us rather than submitted to be sat upon.", chinese: "我们的椅子是他的专利，与其说供人坐下，不如说在拥抱并抚慰我们。" },
+          { order: 5, english: "You must follow me carefully.", chinese: "你们必须仔细跟上我的思路。" }
+        ]
+      }
+    ]
+  },
+  {
+    id: "treasure-island",
+    title: "Treasure Island",
+    author: "Robert Louis Stevenson",
+    coverUrl: "https://covers.openlibrary.org/b/id/8231991-L.jpg",
+    category: "海盗冒险",
+    level: "B1",
+    description: "海盗、藏宝图和少年冒险的源头级故事，句子有画面感，读起来很有冲劲。",
+    totalPages: 260,
+    initialStatus: "wishlist",
+    initialCurrentPage: 0,
+    chapters: [
+      {
+        order: 1,
+        title: "The Old Sea-Dog at the Admiral Benbow",
+        sentences: [
+          { order: 1, english: "Squire Trelawney, Dr. Livesey, and the rest of these gentlemen having asked me to write down the whole particulars about Treasure Island.", chinese: "特里劳尼乡绅、利弗西医生以及其他先生们请我把关于金银岛的全部细节写下来。" },
+          { order: 2, english: "I take up my pen in the year of grace 17-- and go back to the time when my father kept the Admiral Benbow inn.", chinese: "我在公元十七某年提笔，回到父亲经营本葆海军上将旅店的那段时光。" },
+          { order: 3, english: "The brown old seaman, with the sabre cut, first took up his lodging under our roof.", chinese: "那个脸色黝黑、带着刀疤的老水手第一次住进了我们家。" },
+          { order: 4, english: "I remember him as if it were yesterday, as he came plodding to the inn door.", chinese: "我记得他就像昨天才发生的一样，他沉重地走到旅店门前。" },
+          { order: 5, english: "His sea-chest following behind him in a hand-barrow.", chinese: "他的水手箱放在一辆手推车上，跟在他后面。" }
+        ]
+      }
+    ]
+  },
+  {
+    id: "wizard-of-oz",
+    title: "The Wonderful Wizard of Oz",
+    author: "L. Frank Baum",
+    coverUrl: "https://covers.openlibrary.org/b/id/12648747-L.jpg",
+    category: "奇幻童话",
+    level: "A2",
+    description: "龙卷风、黄砖路和奥兹国伙伴团，语言清亮，适合轻松建立英文阅读惯性。",
+    totalPages: 190,
+    initialStatus: "wishlist",
+    initialCurrentPage: 0,
+    chapters: [
+      {
+        order: 1,
+        title: "The Cyclone",
+        sentences: [
+          { order: 1, english: "Dorothy lived in the midst of the great Kansas prairies, with Uncle Henry, who was a farmer, and Aunt Em, who was the farmer's wife.", chinese: "多萝西和农夫亨利叔叔、农夫的妻子艾姆婶婶一起，住在堪萨斯大草原的中央。" },
+          { order: 2, english: "Their house was small, for the lumber to build it had to be carried by wagon many miles.", chinese: "他们的房子很小，因为建房的木材得用马车运很远。" },
+          { order: 3, english: "There were four walls, a floor and a roof, which made one room.", chinese: "四面墙、一块地板和一个屋顶构成了唯一的房间。" },
+          { order: 4, english: "When Dorothy stood in the doorway and looked around, she could see nothing but the great gray prairie on every side.", chinese: "多萝西站在门口四下望去，只能看见四周一片辽阔的灰色草原。" },
+          { order: 5, english: "The sun had baked the plowed land into a gray mass, with little cracks running through it.", chinese: "太阳把翻过的土地烤成灰色的一片，上面布满细小裂缝。" }
+        ]
+      }
+    ]
   }
 ];

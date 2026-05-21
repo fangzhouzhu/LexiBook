@@ -19,6 +19,7 @@ model User {
   words        VocabularyWord[]
   notes        Note[]
   sessions     ReadingSession[]
+  checkIns     ReadingCheckIn[]
   settings     UserSetting?
 }
 
@@ -34,6 +35,9 @@ model Book {
   status      String    @default("reading")
   totalPages  Int       @default(0)
   currentPage Int       @default(0)
+  currentChapterId String?
+  currentSentenceId String?
+  progressPercent Int   @default(0)
   rating      Int?
   startedAt   DateTime?
   finishedAt  DateTime?
@@ -114,6 +118,18 @@ model ReadingSession {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, date])
+}
+
+model ReadingCheckIn {
+  id        String   @id @default(uuid())
+  userId    String
+  dateKey   String
+  checkedAt DateTime @default(now())
+  note      String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
+  @@index([userId, checkedAt])
 }
 
 model UserSetting {

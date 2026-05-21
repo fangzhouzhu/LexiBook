@@ -11,7 +11,7 @@ import {
   SkipForward,
   Volume2
 } from "lucide-react";
-import { getBookMarkdownRaw, saveReadingProgress, translateSentencesOffline } from "@/services/bookApi";
+import { getBookMarkdownRaw, getReadingProgress, saveReadingProgress, translateSentencesOffline } from "@/services/bookApi";
 import { getWordExplain } from "@/services/wordApi";
 import { useReaderStore } from "@/stores/readerStore";
 import type { ChapterReaderData, Sentence, WordExplain } from "@/types/reader";
@@ -48,12 +48,69 @@ function splitIntoSentences(text: string): string[] {
   return matches.map((item) => item.trim()).filter(Boolean);
 }
 
-function markdownToSentences(markdown: string, fallback: Sentence[]): Sentence[] {
-  const paragraphs = markdown
+function normalizeHeading(text: string): string {
+  return normalizeText(text).replace(/^chapter\s+\d+\s*/, "");
+}
+
+function stripMarkdownChrome(markdown: string, chapterTitle: string): string[] {
+  const lines = markdown
     .split(/\r?\n/g)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#") && !line.startsWith("```"))
+    .filter((line) => line && !line.startsWith("#") && !line.startsWith(">") && !line.startsWith("```"))
     .map((line) => line.replace(/^\d+[.)]\s+/, ""));
+
+  const targetTitle = normalizeHeading(chapterTitle);
+  const titleLineIndex = lines.findIndex((line, index) => {
+    if (index < 2) return false;
+    return normalizeHeading(line) === targetTitle;
+  });
+
+  if (titleLineIndex >= 0) {
+    return lines.slice(titleLineIndex + 1);
+  }
+
+  const firstChapterIndex = lines.findIndex((line) => /^(chapter|book)\s+([ivxlcdm]+|\d+)/i.test(line) || /^[ivxlcdm]+\.$/i.test(line));
+  return firstChapterIndex >= 0 ? lines.slice(firstChapterIndex + 1) : lines;
+}
+
+function estimateSentenceUnits(sentence: Sentence): number {
+  const englishUnits = Math.ceil(sentence.english.length / 36);
+  const chineseUnits = Math.ceil((sentence.chinese || "").length / 22);
+  const paragraphBreathingRoom = sentence.english.length > 120 || (sentence.chinese || "").length > 70 ? 1 : 0;
+  return Math.max(1, englishUnits, chineseUnits) + paragraphBreathingRoom;
+}
+
+function paginateSentences(sentences: Sentence[]): Sentence[][] {
+  const pages: Sentence[][] = [];
+  let current: Sentence[] = [];
+  let usedUnits = 0;
+  const maxUnitsPerPage = 18;
+  const maxSentencesPerPage = 8;
+
+  for (const sentence of sentences) {
+    const units = estimateSentenceUnits(sentence);
+    const exceedsBudget = usedUnits + units > maxUnitsPerPage;
+    const exceedsCount = current.length >= maxSentencesPerPage;
+
+    if (current.length > 0 && (exceedsBudget || exceedsCount)) {
+      pages.push(current);
+      current = [];
+      usedUnits = 0;
+    }
+
+    current.push(sentence);
+    usedUnits += units;
+  }
+
+  if (current.length > 0) {
+    pages.push(current);
+  }
+
+  return pages.length ? pages : [[]];
+}
+
+function markdownToSentences(markdown: string, fallback: Sentence[], chapterTitle: string, bookId: string): Sentence[] {
+  const paragraphs = stripMarkdownChrome(markdown, chapterTitle);
 
   const chunks = splitIntoSentences(paragraphs.join(" "))
     .map((item) => item.replace(/\s+/g, " ").trim())
@@ -73,7 +130,7 @@ function markdownToSentences(markdown: string, fallback: Sentence[]): Sentence[]
 
   const aligned = chunks.slice(startIndex);
   return aligned.map((english, index) => ({
-    id: `md-${index + 1}`,
+    id: `${bookId}:md-${index + 1}`,
     order: index + 1,
     english,
     chinese: fallback[index]?.chinese ?? ""
@@ -81,7 +138,6 @@ function markdownToSentences(markdown: string, fallback: Sentence[]): Sentence[]
 }
 
 export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: string }) {
-  const PAGE_SIZE = 8;
   const { hoveredSentenceId, setHoveredSentence, activeSentenceId, setActiveSentence } = useReaderStore();
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [wordDetail, setWordDetail] = useState<WordExplain | null>(null);
@@ -100,9 +156,19 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
   const requestedTranslationsRef = useRef<Set<string>>(new Set());
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const sentences = markdownSentences ?? data.sentences;
-  const pageCount = Math.max(1, Math.ceil(sentences.length / PAGE_SIZE));
-  const pageStart = currentPage * PAGE_SIZE;
-  const visibleSentences = sentences.slice(pageStart, pageStart + PAGE_SIZE);
+  const pagedSentences = useMemo(() => paginateSentences(sentences), [sentences]);
+  const pageStarts = useMemo(() => {
+    const starts: number[] = [];
+    let cursor = 0;
+    for (const page of pagedSentences) {
+      starts.push(cursor);
+      cursor += page.length;
+    }
+    return starts;
+  }, [pagedSentences]);
+  const pageCount = pagedSentences.length;
+  const visibleSentences = pagedSentences[currentPage] ?? [];
+  const pageStart = pageStarts[currentPage] ?? 0;
 
   function closeWordDetail() {
     setSelectedWord(null);
@@ -117,7 +183,7 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
       try {
         const markdown = await getBookMarkdownRaw(bookId);
         if (!mounted) return;
-        setMarkdownSentences(markdownToSentences(markdown, data.sentences));
+        setMarkdownSentences(markdownToSentences(markdown, data.sentences, data.chapterTitle, bookId));
       } catch {
         if (!mounted) return;
         setMarkdownSentences(null);
@@ -127,12 +193,14 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
     return () => {
       mounted = false;
     };
-  }, [bookId, data.sentences]);
+  }, [bookId, data.chapterTitle, data.sentences]);
 
   useEffect(() => {
     let mounted = true;
     async function fillVisibleTranslations() {
-      const translationWindow = sentences.slice(pageStart, pageStart + PAGE_SIZE * 3);
+      const nextPage = pagedSentences[currentPage + 1] ?? [];
+      const afterNextPage = pagedSentences[currentPage + 2] ?? [];
+      const translationWindow = [...visibleSentences, ...nextPage, ...afterNextPage];
       const pending = translationWindow.filter((item) => {
         const hasBase = Boolean(item.chinese && item.chinese.trim());
         const hasRuntime = Boolean(runtimeTranslations[item.id]?.trim());
@@ -157,14 +225,38 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
     return () => {
       mounted = false;
     };
-  }, [pageStart, runtimeTranslations, sentences]);
+  }, [currentPage, pagedSentences, runtimeTranslations, visibleSentences]);
 
   useEffect(() => {
-    const key = `progress:${data.chapterId}`;
-    const saved = window.localStorage.getItem(key);
-    if (!saved) return;
-    setActiveSentence(saved);
-  }, [data.chapterId, setActiveSentence]);
+    let mounted = true;
+    async function restoreProgress() {
+    setActiveSentence(undefined);
+    setHoveredSentence(undefined);
+    const key = `progress:${bookId}:${data.chapterId}`;
+    const legacyKey = `progress:${data.chapterId}`;
+    const localSaved = window.localStorage.getItem(key) ?? window.localStorage.getItem(legacyKey);
+    try {
+      const remote = await getReadingProgress(data.chapterId);
+      if (!mounted) return;
+        const normalizedRemoteId =
+          remote.sentenceId && remote.sentenceId.startsWith("md-") ? `${bookId}:${remote.sentenceId}` : remote.sentenceId;
+        const remoteSentenceId = normalizedRemoteId && sentences.some((item) => item.id === normalizedRemoteId) ? normalizedRemoteId : null;
+        if (remoteSentenceId) {
+          setActiveSentence(remoteSentenceId);
+          window.localStorage.setItem(key, remoteSentenceId);
+          return;
+        }
+      } catch {}
+      const normalizedLocalId = localSaved && localSaved.startsWith("md-") ? `${bookId}:${localSaved}` : localSaved;
+      if (mounted && normalizedLocalId && sentences.some((item) => item.id === normalizedLocalId)) {
+        setActiveSentence(normalizedLocalId);
+      }
+    }
+    void restoreProgress();
+    return () => {
+      mounted = false;
+    };
+  }, [bookId, data.chapterId, sentences, setActiveSentence, setHoveredSentence]);
 
   async function onWordClick(word: string) {
     const normalized = word.replace(/[^a-zA-Z'-]/g, "").toLowerCase();
@@ -179,11 +271,17 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
     }
   }
 
+  async function persistProgress(sentence: Sentence, index: number) {
+    const percent = Math.round(((index + 1) / sentences.length) * 100);
+    window.localStorage.setItem(`progress:${bookId}:${data.chapterId}`, sentence.id);
+    try {
+      await saveReadingProgress({ chapterId: data.chapterId, sentenceId: sentence.id, percent });
+    } catch {}
+  }
+
   async function onSentenceClick(sentence: Sentence, index: number) {
     setActiveSentence(sentence.id);
-    const percent = Math.round(((index + 1) / sentences.length) * 100);
-    window.localStorage.setItem(`progress:${data.chapterId}`, sentence.id);
-    await saveReadingProgress({ chapterId: data.chapterId, sentenceId: sentence.id, percent });
+    await persistProgress(sentence, index);
     playText(sentence.english, index);
   }
 
@@ -194,11 +292,15 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
   }, [activeSentenceId, sentences]);
 
   useEffect(() => {
-    const targetPage = Math.floor(activeIndex / PAGE_SIZE);
-    if (targetPage !== currentPage) {
-      setCurrentPage(targetPage);
+    const targetPage = pageStarts.findIndex((start, index) => {
+      const end = start + (pagedSentences[index]?.length ?? 0);
+      return activeIndex >= start && activeIndex < end;
+    });
+    const normalizedPage = targetPage < 0 ? 0 : targetPage;
+    if (normalizedPage !== currentPage) {
+      setCurrentPage(normalizedPage);
     }
-  }, [activeIndex, currentPage]);
+  }, [activeIndex, currentPage, pageStarts, pagedSentences]);
 
   const progressPercent = useMemo(() => {
     if (sentences.length <= 1) return 0;
@@ -289,9 +391,11 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
     setIsFlipping(true);
     setCurrentPage(target);
     window.setTimeout(() => setIsFlipping(false), 280);
-    const nextSentence = sentences[target * PAGE_SIZE];
+    const nextSentence = pagedSentences[target]?.[0];
     if (nextSentence) {
       setActiveSentence(nextSentence.id);
+      const nextIndex = pageStarts[target] ?? 0;
+      void persistProgress(nextSentence, nextIndex);
     }
   }
 
@@ -306,9 +410,6 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
   return (
     <section
       className="h-[calc(100vh-96px)] overflow-hidden text-[#2c2118]"
-      style={{
-        background: "linear-gradient(180deg, rgba(245,239,228,0.92) 0%, rgba(239,230,214,0.92) 100%)"
-      }}
     >
       <div className="flex h-full min-h-0 flex-col">
         <header className="flex h-[76px] items-center px-7">
@@ -342,16 +443,15 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
                   draggable={false}
                 />
 
-                <div className="absolute left-[11.2%] top-[13.8%] w-[77.8%]">
+                <div className="absolute left-[11.2%] top-[12.6%] w-[77.8%]">
                   <p className="mb-[1.2%] text-[clamp(13px,0.9vw,15px)] text-[#57473a]">Chapter 1</p>
                   <div className="mb-[3.6%] flex items-center gap-3">
                     <h3 className="text-[clamp(26px,2.05vw,42px)] font-medium leading-none tracking-[-0.02em] text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif]">{data.chapterTitle}</h3>
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#b59773] text-[12px] text-[#a48563]">◔</span>
                   </div>
-                  <div className="grid h-[57.5%] grid-cols-[1fr_1fr] gap-x-[5.8%]">
+                  <div className="grid h-[clamp(340px,25.5vw,470px)] grid-cols-[1fr_1fr] gap-x-[5.8%] overflow-hidden pb-[2%]">
                     <div
-                      className={`grid text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif] transition-all duration-300 ${isFlipping ? "opacity-40 -translate-x-1" : "opacity-100 translate-x-0"}`}
-                      style={{ gridTemplateRows: `repeat(${Math.max(visibleSentences.length, 1)}, minmax(0, 1fr))` }}
+                      className={`space-y-[clamp(7px,0.72vw,14px)] overflow-hidden text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif] transition-all duration-300 ${isFlipping ? "opacity-40 -translate-x-1" : "opacity-100 translate-x-0"}`}
                     >
                       {visibleSentences.map((sentence, localIndex) => {
                         const index = pageStart + localIndex;
@@ -360,14 +460,14 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
                         return (
                           <div
                             key={sentence.id}
-                            className={`group flex min-h-0 items-start rounded-[8px] px-[8px] py-[4px] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
+                            className={`group flex items-start rounded-[8px] px-[8px] py-[4px] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
                             onMouseEnter={() => setHoveredSentence(sentence.id)}
                             onMouseLeave={() => setHoveredSentence(undefined)}
                           >
                             <div className="flex w-full items-start gap-3">
                               <span
                                 data-sentence-text
-                                className="flex-1 cursor-pointer leading-[1.55]"
+                                className="flex-1 cursor-pointer leading-[1.48]"
                                 style={{ fontSize: `clamp(14px, ${0.88 * fontScale}vw, 17px)` }}
                                 onClick={() => void onSentenceClick(sentence, index)}
                               >
@@ -405,8 +505,7 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
                     </div>
 
                     <div
-                      className={`grid pt-[0.1%] text-[#2f2419] transition-all duration-300 ${isFlipping ? "opacity-40 translate-x-1" : "opacity-100 translate-x-0"}`}
-                      style={{ gridTemplateRows: `repeat(${Math.max(visibleSentences.length, 1)}, minmax(0, 1fr))` }}
+                      className={`space-y-[clamp(7px,0.72vw,14px)] overflow-hidden pt-[0.1%] text-[#2f2419] transition-all duration-300 ${isFlipping ? "opacity-40 translate-x-1" : "opacity-100 translate-x-0"}`}
                     >
                       {visibleSentences.map((sentence) => {
                         const isHover = hoveredSentenceId === sentence.id;
@@ -414,7 +513,7 @@ export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: 
                         return (
                           <div
                             key={sentence.id}
-                            className={`flex min-h-0 items-start rounded-[8px] px-[8px] py-[4px] leading-[1.55] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
+                            className={`flex items-start rounded-[8px] px-[8px] py-[4px] leading-[1.48] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
                             style={{ fontSize: `clamp(14px, ${0.84 * fontScale}vw, 16px)` }}
                           >
                             {sentence.chinese || runtimeTranslations[sentence.id] || "翻译中..."}

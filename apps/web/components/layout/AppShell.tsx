@@ -29,9 +29,17 @@ const menu = [
   { key: "bookstore", label: "书城", icon: Library, href: "/bookstore" },
   { key: "vocabulary", label: "生词本", icon: Sparkles, href: "/?tab=vocabulary" },
   { key: "notes", label: "笔记", icon: NotebookPen, href: "/?tab=notes" },
-  { key: "statistics", label: "统计", icon: BarChart3, href: "/?tab=statistics" },
-  { key: "settings", label: "设置", icon: Settings, href: "/?tab=settings" }
+  { key: "statistics", label: "统计", icon: BarChart3, href: "/?tab=statistics" }
 ] as const;
+
+const settingsMenuItem = {
+  key: "settings",
+  label: "设置",
+  icon: Settings,
+  href: "/?tab=settings"
+} as const;
+
+const navItems = [...menu, settingsMenuItem] as const;
 
 function mapUser(user: AuthUser | null): ShellUser {
   return {
@@ -100,7 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       ? "bookshelf"
       : pathname === "/bookstore"
         ? "bookstore"
-      : currentTab && menu.some((item) => item.key === currentTab)
+      : currentTab && navItems.some((item) => item.key === currentTab)
         ? currentTab
         : "home";
 
@@ -142,6 +150,21 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
+          <div className="mt-auto flex items-center px-2 pt-8">
+            <Link
+              href={settingsMenuItem.href}
+              aria-label={settingsMenuItem.label}
+              title={settingsMenuItem.label}
+              className={`flex h-11 w-11 items-center justify-center rounded-[14px] transition ${
+                activeKey === settingsMenuItem.key
+                  ? "bg-[linear-gradient(135deg,#a06d31_0%,#b47b39_100%)] text-white shadow-[0_10px_22px_rgba(160,109,49,0.18)]"
+                  : "text-[#5f4a39] hover:bg-[rgba(160,124,84,0.06)] hover:text-[#2d1f14]"
+              }`}
+            >
+              <Settings size={20} />
+            </Link>
+          </div>
         </aside>
 
         <div className={`flex flex-1 flex-col ${isReaderPage ? "min-h-0 h-screen overflow-hidden" : "min-h-screen"}`}>

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, Clock3, Flame, MoreVertical, Trash2, Info } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, CalendarCheck, ChevronLeft, ChevronRight, Clock3, Flame, MoreVertical, Trash2, Info } from "lucide-react";
 import type { ReactNode } from "react";
 import { getStoredUser } from "@/services/authApi";
 
@@ -25,6 +25,14 @@ type ShelfBook = {
 type DeleteCandidate = {
   id: string;
   title: string;
+};
+type DailyStat = {
+  key: string;
+  label: string;
+  minutes: number;
+  sentences: number;
+  words: number;
+  heightPercent: number;
 };
 
 type HomePayload = {
@@ -54,10 +62,13 @@ type HomePayload = {
   }>;
   stats: {
     weeklyMinutes: number;
+    weeklyMinutesLabel: string;
     readingDays: number;
     sentenceCount: number;
     vocabularyCount: number;
     streakDays: number;
+    todayCheckedIn: boolean;
+    weeklyDaily: DailyStat[];
   };
 };
 
@@ -90,6 +101,13 @@ function SectionShell({
   );
 }
 
+function formatHours(minutes: number) {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 export default function DashboardPage() {
   const searchParams = useSearchParams();
   const [active, setActive] = useState<MenuKey>("home");
@@ -104,6 +122,8 @@ export default function DashboardPage() {
   const [detailBook, setDetailBook] = useState<ShelfBook | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<DeleteCandidate | null>(null);
+  const shelfMeasureRef = useRef<HTMLDivElement | null>(null);
+  const [shelfColumns, setShelfColumns] = useState(5);
 
   async function load(section: MenuKey, options?: { silent?: boolean }) {
     if (!options?.silent) setLoading(true);
@@ -141,6 +161,29 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [openBookMenuId]);
 
+  useEffect(() => {
+    if (active !== "bookshelf") return;
+    const node = shelfMeasureRef.current;
+    if (!node) return;
+    const element = node;
+
+    function updateColumns() {
+      const width = element.clientWidth;
+      const minSlotWidth = 196;
+      const nextColumns = Math.max(2, Math.floor(width / minSlotWidth));
+      setShelfColumns(Math.min(10, nextColumns));
+    }
+
+    updateColumns();
+    const observer = new ResizeObserver(updateColumns);
+    observer.observe(element);
+    window.addEventListener("resize", updateColumns);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateColumns);
+    };
+  }, [active]);
+
   const home = data.home as HomePayload | undefined;
   const books = data.bookshelf?.books ?? [];
   const words = data.vocabulary?.words ?? [];
@@ -167,8 +210,15 @@ export default function DashboardPage() {
       return matchStatus && matchKeyword;
     });
   }, [books, searchKeyword, shelfFilter]);
+  const shelfRows = useMemo(() => {
+    const rows: any[][] = [];
+    for (let index = 0; index < filteredShelfBooks.length; index += shelfColumns) {
+      rows.push(filteredShelfBooks.slice(index, index + shelfColumns));
+    }
+    return rows;
+  }, [filteredShelfBooks, shelfColumns]);
 
-  const chartBars = home ? [74, 118, 48, 75, 39, 94, 46] : [];
+  const weeklyDaily = home?.stats.weeklyDaily ?? [];
 
   async function patch(url: string, body: any) {
     await fetch(`${API_BASE}${url}`, {
@@ -186,6 +236,15 @@ export default function DashboardPage() {
       body: JSON.stringify(body)
     });
     await load(active);
+  }
+
+  async function checkInToday() {
+    await fetch(`${API_BASE}/checkins/today`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    await Promise.all([load("home", { silent: true }), load("statistics", { silent: true })]);
   }
 
   async function removeBook(bookId: string) {
@@ -249,8 +308,12 @@ export default function DashboardPage() {
                   >
                     继续阅读
                   </Link>
-                  <button className="rounded-[12px] border border-[var(--border-strong)] bg-white/60 px-6 py-4 text-[15px] font-medium text-[#8c6742]">
-                    今日计划
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[12px] border border-[var(--border-strong)] bg-white/60 px-6 py-4 text-[15px] font-medium text-[#8c6742]"
+                    onClick={() => void checkInToday()}
+                  >
+                    <CalendarCheck size={17} />
+                    {home.stats.todayCheckedIn ? "今日已签到" : "今日签到"}
                   </button>
                 </div>
               </div>
@@ -353,40 +416,52 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-4">
-                <div className="rounded-[10px] border border-[var(--border)] bg-white/58 p-4">
+                <div className="rounded-[14px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.82)_0%,rgba(250,244,235,0.58)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                   <p className="text-[13px] text-[#8b7764]">阅读时长</p>
-                  <p className="mt-3 text-[36px] font-semibold text-[#2f2318]">{Math.floor(home.stats.weeklyMinutes / 60)} h</p>
+                  <p className="mt-3 text-[34px] font-semibold text-[#2f2318]">{formatHours(home.stats.weeklyMinutes)}</p>
                   <p className="text-[13px] text-[#8b7764]">本周阅读</p>
                 </div>
-                <div className="rounded-[10px] border border-[var(--border)] bg-white/58 p-4">
+                <div className="rounded-[14px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.82)_0%,rgba(250,244,235,0.58)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                   <p className="text-[13px] text-[#8b7764]">阅读天数</p>
                   <p className="mt-3 text-[36px] font-semibold text-[#2f2318]">{home.stats.readingDays} 天</p>
-                  <p className="text-[13px] text-[#8b7764]">累计坚持</p>
+                  <p className="text-[13px] text-[#8b7764]">真实活跃天</p>
                 </div>
-                <div className="rounded-[10px] border border-[var(--border)] bg-white/58 p-4">
+                <div className="rounded-[14px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.82)_0%,rgba(250,244,235,0.58)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                   <p className="text-[13px] text-[#8b7764]">阅读句子</p>
                   <p className="mt-3 text-[36px] font-semibold text-[#2f2318]">{home.stats.sentenceCount}</p>
                   <p className="text-[13px] text-[#8b7764]">累计阅读</p>
                 </div>
-                <div className="rounded-[10px] border border-[var(--border)] bg-white/58 p-4">
+                <div className="rounded-[14px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.82)_0%,rgba(250,244,235,0.58)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                   <p className="text-[13px] text-[#8b7764]">掌握单词</p>
                   <p className="mt-3 text-[36px] font-semibold text-[#2f2318]">{home.stats.vocabularyCount}</p>
-                  <p className="text-[13px] text-[#8b7764]">累计掌握</p>
+                  <p className="text-[13px] text-[#8b7764]">已标记掌握</p>
                 </div>
               </div>
 
               <div className="mt-7">
                 <div className="mb-4 flex items-center justify-between">
                   <p className="text-[15px] font-semibold text-[#4d3a28]">本周阅读时长</p>
-                  <p className="text-[14px] text-[#8c7763]">5 小时 50 分钟</p>
+                  <p className="text-[14px] text-[#8c7763]">{home.stats.weeklyMinutesLabel}</p>
                 </div>
-                <div className="flex h-44 items-end gap-4 rounded-[12px] border border-[var(--border)] bg-white/52 px-4 pb-4 pt-6">
-                  {chartBars.map((value, index) => (
-                    <div key={index} className="flex flex-1 flex-col items-center gap-2">
-                      <div className="w-full rounded-[14px] bg-[linear-gradient(180deg,#d4b38a_0%,#b57a39_100%)]" style={{ height: `${value}px` }} />
-                      <span className="text-[12px] text-[#8c7763]">{["周一", "周二", "周三", "周四", "周五", "周六", "周日"][index]}</span>
-                    </div>
-                  ))}
+                <div className="relative overflow-hidden rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[radial-gradient(circle_at_18%_12%,rgba(214,177,130,0.18),transparent_34%),linear-gradient(180deg,rgba(255,253,249,0.78)_0%,rgba(250,244,235,0.62)_100%)] px-4 pb-4 pt-7">
+                  <div className="absolute inset-x-4 top-1/2 border-t border-dashed border-[rgba(151,118,83,0.14)]" />
+                  <div className="relative flex h-40 items-end gap-3">
+                    {weeklyDaily.map((item) => (
+                      <div key={item.key} className="group flex flex-1 flex-col items-center gap-2">
+                        <div className="flex h-32 w-full items-end rounded-full bg-[rgba(122,84,44,0.06)] px-1 pb-1">
+                          <div
+                            className="relative w-full rounded-full bg-[linear-gradient(180deg,#e4c08d_0%,#bd7d35_72%,#9c6228_100%)] shadow-[0_10px_18px_rgba(156,98,40,0.22)] transition duration-200 group-hover:brightness-105"
+                            style={{ height: `${item.heightPercent}%` }}
+                          >
+                            <span className="absolute -top-7 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded-full bg-[#3b2a1c] px-2 py-1 text-[11px] text-white shadow-lg group-hover:block">
+                              {item.minutes} 分钟
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[12px] text-[#8c7763]">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -402,6 +477,16 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-[30px] font-semibold text-[#9c6a2f]">{home.stats.streakDays} 天</div>
               </div>
+              <button
+                onClick={() => void checkInToday()}
+                className={`mt-4 w-full rounded-[12px] px-5 py-3 text-[14px] font-semibold ${
+                  home.stats.todayCheckedIn
+                    ? "border border-[rgba(151,118,83,0.18)] bg-white/58 text-[#7b6957]"
+                    : "bg-[linear-gradient(135deg,#9c6a2f_0%,#b57a39_100%)] text-white"
+                }`}
+              >
+                {home.stats.todayCheckedIn ? "今天已经签到，明天继续" : "签到并点亮今天"}
+              </button>
             </section>
           </section>
         </>
@@ -447,78 +532,91 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            <div className="relative mt-7 overflow-x-auto pb-7">
-              <div className="flex min-w-max items-end gap-6 px-1">
-                {filteredShelfBooks.map((book: any) => {
-                  const percent = Math.round((book.currentPage / Math.max(book.totalPages, 1)) * 100);
-                  return (
-                    <div key={book.id} className="group relative w-[150px]">
-                      <Link href={`/books/${book.id}/chapters/${book.firstChapterId}`} className="group block">
-                      <div className="relative rounded-[8px] bg-[linear-gradient(90deg,rgba(60,39,20,0.10),rgba(255,255,255,0.04)_16%,rgba(33,20,10,0.18))] p-[6px] shadow-[0_16px_24px_rgba(55,34,16,0.16)] transition duration-200 group-hover:-translate-y-1 group-hover:shadow-[0_20px_32px_rgba(55,34,16,0.20)]">
-                        <div className="absolute inset-y-[8px] left-[6px] w-[7px] rounded-l-[6px] bg-[rgba(28,18,12,0.22)]" />
-                        <img src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[6px] object-cover" />
-                        <span className="absolute bottom-3 right-3 rounded-full bg-[rgba(35,24,16,0.78)] px-2 py-1 text-[11px] font-semibold text-white shadow-[0_4px_10px_rgba(0,0,0,0.18)]">
-                          {book.status === "finished" ? "已完成" : `${percent}%`}
-                        </span>
-                      </div>
-                      </Link>
-                      <button
-                        type="button"
-                        data-book-trigger
-                        className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-full bg-[rgba(32,22,15,0.70)] text-white shadow-[0_6px_14px_rgba(0,0,0,0.18)] opacity-0 transition hover:bg-[rgba(32,22,15,0.88)] group-hover:opacity-100"
-                        aria-label="书籍操作"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setOpenBookMenuId((id) => (id === book.id ? null : book.id));
-                        }}
-                      >
-                        <MoreVertical size={15} />
-                      </button>
-                      {openBookMenuId === book.id ? (
-                        <div
-                          data-book-menu
-                          className="absolute right-0 top-10 z-40 w-36 overflow-hidden rounded-[8px] border border-[rgba(151,118,83,0.18)] bg-[#fffdf8] py-1 shadow-[0_14px_28px_rgba(54,33,20,0.18)]"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#49382b] hover:bg-[rgba(156,106,47,0.08)]"
-                            onClick={() => {
-                              setDetailBook(book);
-                              setOpenBookMenuId(null);
-                            }}
-                          >
-                            <Info size={14} />
-                            详情
-                          </button>
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#9b4f2b] hover:bg-[rgba(202,111,58,0.10)]"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setDeleteCandidate({ id: book.id, title: book.title });
-                              setOpenBookMenuId(null);
-                            }}
-                          >
-                            <Trash2 size={14} />
-                            移除书籍
-                          </button>
-                        </div>
-                      ) : null}
-                      <p className="mt-3 truncate text-[15px] font-semibold text-[#2f2318]">{book.title}</p>
-                      <p className="mt-1 truncate text-[13px] text-[#7c6856]">{book.author}</p>
+            <div className="relative mt-7 overflow-hidden rounded-[22px] border border-[rgba(151,118,83,0.14)] bg-[radial-gradient(circle_at_24%_0%,rgba(255,255,255,0.74),transparent_35%),linear-gradient(180deg,rgba(255,252,247,0.86)_0%,rgba(247,236,219,0.72)_100%)] px-7 pb-8 pt-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.76),0_24px_52px_rgba(74,47,24,0.10)]">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(120deg,rgba(143,100,56,0.10)_0%,transparent_18%,transparent_78%,rgba(143,100,56,0.08)_100%)]" />
+              <div ref={shelfMeasureRef} className="relative z-10 space-y-8">
+                {shelfRows.map((row) => (
+                  <div key={row.map((book: any) => book.id).join("-")} className="relative min-h-[392px]">
+                    <img
+                      src="/bookshelf/shelf-plank.png"
+                      alt=""
+                      className="pointer-events-none absolute left-0 right-0 top-[194px] z-0 h-[72px] w-full object-fill blur-[0.35px] saturate-[1.04] drop-shadow-[0_18px_18px_rgba(85,49,22,0.28)]"
+                    />
+                    <div className="relative z-10 mx-auto grid gap-x-10" style={{ width: "calc(100% - 140px)", gridTemplateColumns: `repeat(${shelfColumns}, minmax(0, 1fr))` }}>
+                      {row.map((book: any) => {
+                        const percent = Math.round((book.currentPage / Math.max(book.totalPages, 1)) * 100);
+                        return (
+                          <div key={book.id} className="group relative min-w-0 text-center">
+                            <Link href={`/books/${book.id}/chapters/${book.firstChapterId}`} className="mx-auto block w-[156px]">
+                              <div className="relative rounded-[8px] shadow-[0_20px_26px_rgba(55,34,16,0.30)] transition duration-200 group-hover:-translate-y-1 group-hover:shadow-[0_24px_36px_rgba(55,34,16,0.36)]">
+                                <div className="absolute inset-y-1 left-0 z-10 w-[8px] rounded-l-[7px] bg-[linear-gradient(90deg,rgba(18,11,7,0.32),rgba(255,255,255,0.08))]" />
+                                <img src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[8px] object-cover" />
+                                <span className="absolute bottom-3 right-3 rounded-full bg-[rgba(35,24,16,0.78)] px-2 py-1 text-[11px] font-semibold text-white shadow-[0_4px_10px_rgba(0,0,0,0.18)]">
+                                  {book.status === "finished" ? "已完成" : `${percent}%`}
+                                </span>
+                              </div>
+                            </Link>
+                            <button
+                              type="button"
+                              data-book-trigger
+                              className="absolute right-1/2 top-2 z-30 flex h-7 w-7 translate-x-[78px] items-center justify-center rounded-full bg-[rgba(32,22,15,0.70)] text-white shadow-[0_6px_14px_rgba(0,0,0,0.18)] opacity-0 transition hover:bg-[rgba(32,22,15,0.88)] group-hover:opacity-100"
+                              aria-label="书籍操作"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setOpenBookMenuId((id) => (id === book.id ? null : book.id));
+                              }}
+                            >
+                              <MoreVertical size={15} />
+                            </button>
+                            {openBookMenuId === book.id ? (
+                              <div
+                                data-book-menu
+                                className="absolute right-1/2 top-10 z-40 w-36 translate-x-[78px] overflow-hidden rounded-[8px] border border-[rgba(151,118,83,0.18)] bg-[#fffdf8] py-1 shadow-[0_14px_28px_rgba(54,33,20,0.18)]"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#49382b] hover:bg-[rgba(156,106,47,0.08)]"
+                                  onClick={() => {
+                                    setDetailBook(book);
+                                    setOpenBookMenuId(null);
+                                  }}
+                                >
+                                  <Info size={14} />
+                                  详情
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#9b4f2b] hover:bg-[rgba(202,111,58,0.10)]"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setDeleteCandidate({ id: book.id, title: book.title });
+                                    setOpenBookMenuId(null);
+                                  }}
+                                >
+                                  <Trash2 size={14} />
+                                  移除书籍
+                                </button>
+                              </div>
+                            ) : null}
+                            <div className="relative z-20 mt-[46px] px-2 py-1">
+                              <p className="truncate text-[15px] font-semibold text-[#3b2b1f] drop-shadow-[0_1px_0_rgba(255,255,255,0.72)]">{book.title}</p>
+                              <p className="mt-1 truncate text-[13px] text-[#765f4d] drop-shadow-[0_1px_0_rgba(255,255,255,0.72)]">{book.author}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
                 {!filteredShelfBooks.length ? (
-                  <div className="flex h-[220px] w-full min-w-[520px] items-center justify-center rounded-[8px] border border-dashed border-[rgba(151,118,83,0.24)] bg-white/42 text-[14px] text-[#8b7764]">
+                  <div className="flex h-[220px] w-full items-center justify-center rounded-[14px] border border-dashed border-[rgba(151,118,83,0.24)] bg-white/42 text-[14px] text-[#8b7764]">
                     没有匹配的书籍
                   </div>
                 ) : null}
               </div>
-              <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-5 rounded-full bg-[linear-gradient(180deg,#b7834a_0%,#7a4f28_100%)] shadow-[0_14px_20px_rgba(77,47,21,0.22)]" />
             </div>
           </section>
 
@@ -594,29 +692,103 @@ export default function DashboardPage() {
 
       {active === "statistics" && stats ? (
         <SectionShell title="统计" subtitle="用更长期的视角看你的阅读节奏，而不是只看某一天的努力。">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
+          <div className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.86)_0%,rgba(250,244,235,0.62)_100%)] p-5">
               <p className="text-[13px] text-[#8b7764]">总阅读时长</p>
-              <p className="mt-3 text-[40px] font-semibold text-[#2f2318]">{stats.totalMinutes}m</p>
+              <p className="mt-3 text-[34px] font-semibold text-[#2f2318]">{formatHours(stats.totalMinutes)}</p>
             </div>
-            <div className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
+            <div className="rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.86)_0%,rgba(250,244,235,0.62)_100%)] p-5">
+              <p className="text-[13px] text-[#8b7764]">活跃阅读日</p>
+              <p className="mt-3 text-[34px] font-semibold text-[#2f2318]">{stats.activeDays ?? 0} 天</p>
+            </div>
+            <div className="rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.86)_0%,rgba(250,244,235,0.62)_100%)] p-5">
               <p className="text-[13px] text-[#8b7764]">阅读句子</p>
-              <p className="mt-3 text-[40px] font-semibold text-[#2f2318]">{stats.totalSentences}</p>
+              <p className="mt-3 text-[34px] font-semibold text-[#2f2318]">{stats.totalSentences}</p>
             </div>
-            <div className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
-              <p className="text-[13px] text-[#8b7764]">学习生词</p>
-              <p className="mt-3 text-[40px] font-semibold text-[#2f2318]">{stats.totalWords}</p>
+            <div className="rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.86)_0%,rgba(250,244,235,0.62)_100%)] p-5">
+              <p className="text-[13px] text-[#8b7764]">掌握单词</p>
+              <p className="mt-3 text-[34px] font-semibold text-[#2f2318]">{stats.masteredWords ?? 0}</p>
             </div>
           </div>
-          <div className="mt-6 flex h-56 items-end gap-4 rounded-[22px] border border-[var(--border)] bg-white/55 p-5">
-            {stats.sessions.map((session: any) => (
-              <div key={session.id} className="flex flex-1 flex-col items-center gap-3">
-                <div className="w-full rounded-full bg-[linear-gradient(180deg,#d4b38a_0%,#b57a39_100%)]" style={{ height: `${Math.max(24, session.durationMin)}px` }} />
-                <span className="text-xs text-[#7e6c59]">
-                  {formatMonthDayUTC(session.date)}
-                </span>
+          <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.4fr]">
+            <div className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[13px] text-[#8b7764]">签到连续天数</p>
+                  <p className="mt-3 text-[40px] font-semibold text-[#2f2318]">{stats.streakDays ?? 0} 天</p>
+                </div>
+                <button
+                  onClick={() => void checkInToday()}
+                  className={`rounded-[10px] px-4 py-2 text-[13px] font-semibold ${
+                    stats.todayCheckedIn
+                      ? "border border-[var(--border)] bg-white/70 text-[#7b6957]"
+                      : "bg-[linear-gradient(135deg,#9c6a2f_0%,#b57a39_100%)] text-white"
+                  }`}
+                >
+                  {stats.todayCheckedIn ? "今日已签到" : "立即签到"}
+                </button>
               </div>
-            ))}
+              <div className="mt-5 grid grid-cols-7 gap-2">
+                {(stats.checkIns ?? []).slice(0, 14).reverse().map((item: any) => (
+                  <div key={item.id} className="rounded-[8px] bg-[rgba(156,106,47,0.14)] px-2 py-2 text-center text-[11px] text-[#7b5524]">
+                    {String(item.dateKey).slice(5)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
+              <p className="text-[15px] font-semibold text-[#4d3a28]">书籍阅读进度</p>
+              <div className="mt-4 space-y-3">
+                {(stats.books ?? []).map((book: any) => {
+                  const percent = book.progressPercent ?? Math.round((book.currentPage / Math.max(book.totalPages, 1)) * 100);
+                  return (
+                    <div key={book.id} className="grid gap-3 sm:grid-cols-[1fr_90px] sm:items-center">
+                      <div>
+                        <div className="flex items-center justify-between gap-3 text-[13px] text-[#5f5042]">
+                          <span className="truncate font-semibold">{book.title}</span>
+                          <span>{percent}%</span>
+                        </div>
+                        <div className="mt-2 h-2 rounded-full bg-[rgba(168,131,90,0.14)]">
+                          <div className="h-full rounded-full bg-[linear-gradient(90deg,#8f5f2b_0%,#b8813c_100%)]" style={{ width: `${percent}%` }} />
+                        </div>
+                      </div>
+                      <span className="text-right text-[12px] text-[#8b7764]">{book.currentPage}/{book.totalPages} 页</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 rounded-[22px] border border-[rgba(151,118,83,0.16)] bg-[radial-gradient(circle_at_8%_10%,rgba(214,177,130,0.18),transparent_28%),linear-gradient(180deg,rgba(255,253,249,0.74)_0%,rgba(250,244,235,0.58)_100%)] p-5">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <p className="text-[16px] font-semibold text-[#4d3a28]">最近 14 天阅读趋势</p>
+                <p className="mt-1 text-[13px] text-[#8b7764]">按真实阅读会话聚合，柱高代表阅读分钟数。</p>
+              </div>
+              <span className="rounded-full bg-[rgba(156,106,47,0.10)] px-3 py-1 text-[12px] text-[#8d6434]">
+                日均 {stats.averageMinutes ?? 0} 分钟
+              </span>
+            </div>
+            <div className="relative flex h-64 items-end gap-2 rounded-[18px] border border-[rgba(151,118,83,0.12)] bg-white/45 px-4 pb-5 pt-8">
+              <div className="absolute inset-x-4 top-1/3 border-t border-dashed border-[rgba(151,118,83,0.12)]" />
+              <div className="absolute inset-x-4 top-2/3 border-t border-dashed border-[rgba(151,118,83,0.12)]" />
+              {(stats.daily ?? []).map((item: DailyStat) => (
+                <div key={item.key} className="group relative z-10 flex flex-1 flex-col items-center gap-3">
+                  <div className="flex h-48 w-full items-end rounded-full bg-[rgba(122,84,44,0.05)] px-1 pb-1">
+                    <div
+                      className="relative w-full rounded-full bg-[linear-gradient(180deg,#efd19c_0%,#c8893f_68%,#965e2a_100%)] shadow-[0_12px_22px_rgba(156,98,40,0.20)] transition duration-200 group-hover:scale-[1.02]"
+                      style={{ height: `${item.heightPercent}%` }}
+                    >
+                      <div className="absolute -top-16 left-1/2 hidden w-28 -translate-x-1/2 rounded-[10px] bg-[#3b2a1c] px-3 py-2 text-center text-[11px] leading-5 text-white shadow-lg group-hover:block">
+                        <div>{item.minutes} 分钟</div>
+                        <div>{item.sentences} 句</div>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[11px] text-[#7e6c59]">{item.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </SectionShell>
       ) : null}

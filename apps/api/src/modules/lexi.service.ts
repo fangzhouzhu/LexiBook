@@ -46,6 +46,7 @@ export class LexiService {
     await this.ensureWords(user.id);
     await this.ensureNotes(user.id);
     await this.ensureSessions(user.id);
+    await this.ensureCheckIns(user.id);
     return user;
   }
 
@@ -69,6 +70,7 @@ export class LexiService {
             description: item.description,
             totalPages: item.totalPages,
             currentPage: item.initialCurrentPage,
+            progressPercent: item.totalPages > 0 ? Math.round((item.initialCurrentPage / item.totalPages) * 100) : 0,
             status: item.initialStatus
           }
         }));
@@ -81,7 +83,8 @@ export class LexiService {
             category: item.category,
             level: item.level,
             description: item.description,
-            totalPages: item.totalPages
+            totalPages: item.totalPages,
+            progressPercent: item.totalPages > 0 ? Math.round((existing.currentPage / item.totalPages) * 100) : 0
           }
         });
       }
@@ -188,6 +191,29 @@ export class LexiService {
         { userId, date: new Date("2026-05-20T11:30:00.000Z"), durationMin: 44, sentencesRead: 99, wordsLearned: 8 }
       ]
     });
+  }
+
+  private async ensureCheckIns(userId: string) {
+    const existingCount = await this.prisma.readingCheckIn.count({ where: { userId } });
+    if (existingCount > 0) return;
+    const today = new Date();
+    const data = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (5 - index));
+      return {
+        userId,
+        dateKey: this.toDateKey(date),
+        checkedAt: date
+      };
+    });
+    await this.prisma.readingCheckIn.createMany({ data });
+  }
+
+  private toDateKey(date: Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
   async getDemoUserId() {

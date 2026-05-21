@@ -5,6 +5,13 @@ import { CATALOG_BOOKS } from "./catalog.data";
 import { LexiService } from "./lexi.service";
 import { PrismaService } from "./prisma.service";
 
+type ReadingSessionSummary = {
+  date: Date;
+  durationMin: number;
+  sentencesRead: number;
+  wordsLearned: number;
+};
+
 @Controller()
 export class DashboardController {
   constructor(
@@ -15,7 +22,7 @@ export class DashboardController {
   @Get("home")
   async home() {
     const userId = await this.lexiService.getDemoUserId();
-    const [user, books, words, notes, sessions] = await Promise.all([
+    const [user, books, words, notes, sessions, checkIns] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({ where: { id: userId } }),
       this.prisma.book.findMany({
         where: { userId, status: { not: "removed" } },
@@ -24,12 +31,17 @@ export class DashboardController {
       }),
       this.prisma.vocabularyWord.findMany({ where: { userId } }),
       this.prisma.note.findMany({ where: { userId }, orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }] }),
-      this.prisma.readingSession.findMany({ where: { userId }, orderBy: { date: "desc" }, take: 7 })
+      this.prisma.readingSession.findMany({ where: { userId }, orderBy: { date: "asc" } }),
+      this.prisma.readingCheckIn.findMany({ where: { userId }, orderBy: { checkedAt: "desc" }, take: 60 })
     ]);
 
     const currentBook = books.find((b) => b.status === "reading") ?? books[0] ?? null;
-    const weeklyMinutes = sessions.reduce((sum, s) => sum + s.durationMin, 0);
+    const weeklyDaily = this.buildDailyStats(sessions, 7);
+    const weeklyMinutes = weeklyDaily.reduce((sum, item) => sum + item.minutes, 0);
     const totalSentences = sessions.reduce((sum, s) => sum + s.sentencesRead, 0);
+    const checkInKeys = checkIns.map((item) => item.dateKey);
+    const readingDays = new Set(sessions.filter((item) => item.durationMin > 0 || item.sentencesRead > 0).map((item) => this.toDateKey(item.date))).size;
+    const masteredWords = words.filter((word) => word.mastered).length;
 
     return {
       user: { displayName: user.displayName, avatarUrl: user.avatarUrl },
@@ -43,16 +55,19 @@ export class DashboardController {
       continueReading: currentBook
         ? {
             ...currentBook,
-            firstChapterId: currentBook.chapters[0]?.id ?? null
+            firstChapterId: currentBook.currentChapterId ?? currentBook.chapters[0]?.id ?? null
           }
         : null,
       recommendations: books.slice(0, 5),
       stats: {
         weeklyMinutes,
-        readingDays: sessions.length,
+        weeklyMinutesLabel: this.formatDuration(weeklyMinutes),
+        readingDays,
         sentenceCount: totalSentences,
-        vocabularyCount: words.length,
-        streakDays: 16
+        vocabularyCount: masteredWords,
+        streakDays: this.calculateStreak(checkInKeys),
+        todayCheckedIn: checkInKeys.includes(this.toDateKey(new Date())),
+        weeklyDaily
       },
       notesPreview: notes.slice(0, 3)
     };
@@ -69,7 +84,7 @@ export class DashboardController {
     return {
       books: books.map((book) => ({
         ...book,
-        firstChapterId: book.chapters[0]?.id ?? null
+        firstChapterId: book.currentChapterId ?? book.chapters[0]?.id ?? null
       }))
     };
   }
@@ -123,6 +138,7 @@ export class DashboardController {
         description: selected.description,
         totalPages: selected.totalPages,
         currentPage: 0,
+        progressPercent: 0,
         status: "wishlist"
       }
     });
@@ -151,11 +167,14 @@ export class DashboardController {
 
   @Patch("bookshelf/:id/progress")
   async updateBookProgress(@Param("id") id: string, @Body() body: { currentPage: number }) {
+    const existing = await this.prisma.book.findUniqueOrThrow({ where: { id } });
+    const currentPage = Math.min(existing.totalPages, Math.max(0, body.currentPage));
     const book = await this.prisma.book.update({
       where: { id },
       data: {
-        currentPage: body.currentPage,
-        status: body.currentPage > 0 ? "reading" : "wishlist",
+        currentPage,
+        progressPercent: Math.round((currentPage / Math.max(1, existing.totalPages)) * 100),
+        status: currentPage > 0 ? "reading" : "wishlist",
         lastReadAt: new Date()
       }
     });
@@ -294,16 +313,51 @@ export class DashboardController {
   @Get("statistics")
   async statistics() {
     const userId = await this.lexiService.getDemoUserId();
-    const sessions = await this.prisma.readingSession.findMany({ where: { userId }, orderBy: { date: "asc" }, take: 14 });
+    const [sessions, books, checkIns, words] = await Promise.all([
+      this.prisma.readingSession.findMany({ where: { userId }, orderBy: { date: "asc" } }),
+      this.prisma.book.findMany({
+        where: { userId, status: { not: "removed" } },
+        select: { id: true, title: true, author: true, coverUrl: true, currentPage: true, totalPages: true, progressPercent: true, status: true, lastReadAt: true },
+        orderBy: { lastReadAt: "desc" },
+        take: 8
+      }),
+      this.prisma.readingCheckIn.findMany({ where: { userId }, orderBy: { checkedAt: "desc" }, take: 60 }),
+      this.prisma.vocabularyWord.findMany({ where: { userId } })
+    ]);
     const totalMinutes = sessions.reduce((sum, s) => sum + s.durationMin, 0);
     const totalSentences = sessions.reduce((sum, s) => sum + s.sentencesRead, 0);
     const totalWords = sessions.reduce((sum, s) => sum + s.wordsLearned, 0);
+    const checkInKeys = checkIns.map((item) => item.dateKey);
+    const daily = this.buildDailyStats(sessions, 14);
+    const activeDays = new Set(sessions.filter((item) => item.durationMin > 0 || item.sentencesRead > 0).map((item) => this.toDateKey(item.date))).size;
+    const masteredWords = words.filter((word) => word.mastered).length;
     return {
       totalMinutes,
+      totalMinutesLabel: this.formatDuration(totalMinutes),
       totalSentences,
       totalWords,
-      sessions
+      masteredWords,
+      activeDays,
+      averageMinutes: activeDays > 0 ? Math.round(totalMinutes / activeDays) : 0,
+      sessions,
+      daily,
+      books,
+      checkIns,
+      streakDays: this.calculateStreak(checkInKeys),
+      todayCheckedIn: checkInKeys.includes(this.toDateKey(new Date()))
     };
+  }
+
+  @Post("checkins/today")
+  async checkInToday(@Body() body: { note?: string }) {
+    const userId = await this.lexiService.getDemoUserId();
+    const dateKey = this.toDateKey(new Date());
+    const checkIn = await this.prisma.readingCheckIn.upsert({
+      where: { userId_dateKey: { userId, dateKey } },
+      update: { note: body.note },
+      create: { userId, dateKey, note: body.note }
+    });
+    return { ok: true, checkIn };
   }
 
   @Get("settings")
@@ -332,5 +386,60 @@ export class DashboardController {
       data: body
     });
     return { settings };
+  }
+
+  private toDateKey(date: Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  private formatDuration(minutes: number) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours <= 0) return `${mins} 分钟`;
+    if (mins <= 0) return `${hours} 小时`;
+    return `${hours} 小时 ${mins} 分钟`;
+  }
+
+  private buildDailyStats(sessions: ReadingSessionSummary[], days: number) {
+    const today = new Date();
+    const buckets = Array.from({ length: days }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (days - 1 - index));
+      const key = this.toDateKey(date);
+      return {
+        key,
+        label: days <= 7 ? ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()] : `${date.getMonth() + 1}/${date.getDate()}`,
+        minutes: 0,
+        sentences: 0,
+        words: 0
+      };
+    });
+    const byKey = new Map(buckets.map((item) => [item.key, item]));
+    for (const session of sessions) {
+      const bucket = byKey.get(this.toDateKey(session.date));
+      if (!bucket) continue;
+      bucket.minutes += session.durationMin;
+      bucket.sentences += session.sentencesRead;
+      bucket.words += session.wordsLearned;
+    }
+    const maxMinutes = Math.max(1, ...buckets.map((item) => item.minutes));
+    return buckets.map((item) => ({
+      ...item,
+      heightPercent: Math.max(item.minutes > 0 ? 12 : 4, Math.round((item.minutes / maxMinutes) * 100))
+    }));
+  }
+
+  private calculateStreak(dateKeys: string[]) {
+    const keySet = new Set(dateKeys);
+    let streak = 0;
+    const cursor = new Date();
+    while (keySet.has(this.toDateKey(cursor))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return streak;
   }
 }
