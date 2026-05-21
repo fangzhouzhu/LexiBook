@@ -9,6 +9,7 @@ import {
   BookText,
   ChevronDown,
   Home,
+  Library,
   LogOut,
   NotebookPen,
   Settings,
@@ -25,6 +26,7 @@ type ShellUser = {
 const menu = [
   { key: "home", label: "首页", icon: Home, href: "/" },
   { key: "bookshelf", label: "书架", icon: BookOpen, href: "/?tab=bookshelf" },
+  { key: "bookstore", label: "书城", icon: Library, href: "/bookstore" },
   { key: "vocabulary", label: "生词本", icon: Sparkles, href: "/?tab=vocabulary" },
   { key: "notes", label: "笔记", icon: NotebookPen, href: "/?tab=notes" },
   { key: "statistics", label: "统计", icon: BarChart3, href: "/?tab=statistics" },
@@ -92,9 +94,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const currentTab = searchParams.get("tab");
+  const isReaderPage = pathname.startsWith("/books/");
   const activeKey =
-    pathname.startsWith("/books/")
+    isReaderPage
       ? "bookshelf"
+      : pathname === "/bookstore"
+        ? "bookstore"
       : currentTab && menu.some((item) => item.key === currentTab)
         ? currentTab
         : "home";
@@ -107,9 +112,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="relative min-h-screen w-full">
+    <div className={`relative min-w-[1440px] w-full ${isReaderPage ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.78),transparent_26%),radial-gradient(circle_at_82%_10%,rgba(214,188,152,0.12),transparent_18%)]" />
-      <div className="relative flex w-full">
+      <div className="relative flex min-w-[1440px] w-full">
         <aside className="sticky top-0 flex h-screen w-[228px] flex-col border-r border-[var(--border)] bg-[rgba(251,247,240,0.72)] px-6 py-9 backdrop-blur-lg">
           <Link href="/" className="flex items-center gap-3 px-2 text-[26px] font-semibold tracking-[-0.03em] text-[#2d1f14]">
             <BookText size={28} />
@@ -139,7 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
         </aside>
 
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div className={`flex flex-1 flex-col ${isReaderPage ? "min-h-0 h-screen overflow-hidden" : "min-h-screen"}`}>
           <header className="flex items-center justify-end px-10 pb-4 pt-6">
             <div className="relative">
               <button
@@ -177,7 +182,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main className="flex-1 px-10 pb-10">{children}</main>
+          <main className={`flex-1 px-10 ${isReaderPage ? "min-h-0 overflow-hidden pb-0" : "pb-10"}`}>{children}</main>
         </div>
       </div>
     </div>

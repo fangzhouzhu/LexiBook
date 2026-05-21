@@ -7,5 +7,5 @@ type Props = {
 
 export default async function ReaderPage({ params }: Props) {
   const data = await getChapterReaderData(params.chapterId);
-  return <BookReader data={data} />;
+  return <BookReader data={data} bookId={params.bookId} />;
 }

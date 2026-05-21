@@ -1,4 +1,4 @@
-import type { ChapterReaderData } from "@/types/reader";
+﻿import type { ChapterReaderData } from "@/types/reader";
 import { getToken } from "./authApi";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
@@ -26,6 +26,28 @@ export async function saveReadingProgress(payload: {
     body: JSON.stringify(payload)
   });
   if (!res.ok) {
-    throw new Error("保存进度失败，请先登录");
+    throw new Error("保存阅读进度失败，请先登录");
   }
+}
+
+export async function getBookMarkdownRaw(bookId: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/books/${bookId}/markdown/raw`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error("Failed to fetch markdown content");
+  }
+  return res.text();
+}
+
+export async function translateSentencesOffline(texts: string[]): Promise<string[]> {
+  if (!texts.length) return [];
+  const res = await fetch(`${API_BASE}/chapters/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts })
+  });
+  if (!res.ok) {
+    throw new Error("Failed to translate sentences");
+  }
+  const data = (await res.json()) as { translations?: string[] };
+  return data.translations ?? [];
 }

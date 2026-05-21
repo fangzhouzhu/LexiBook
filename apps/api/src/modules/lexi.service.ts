@@ -1,132 +1,193 @@
 import { Injectable } from "@nestjs/common";
+import type { User } from "@prisma/client";
 import { PrismaService } from "./prisma.service";
+import { CATALOG_BOOKS } from "./catalog.data";
 
 const DEMO_USERNAME = "alex";
 
 @Injectable()
 export class LexiService {
+  private seedPromise?: Promise<User>;
+
   constructor(private readonly prisma: PrismaService) {}
 
   async ensureSeedData() {
-    const existing = await this.prisma.user.findUnique({ where: { username: DEMO_USERNAME } });
-    if (existing) {
-      return existing;
+    this.seedPromise ??= this.ensureSeedDataOnce().finally(() => {
+      this.seedPromise = undefined;
+    });
+    return this.seedPromise;
+  }
+
+  private async ensureSeedDataOnce() {
+    let user = await this.prisma.user.findUnique({ where: { username: DEMO_USERNAME } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          username: DEMO_USERNAME,
+          passwordHash: "demo-password-hash",
+          displayName: "Alex",
+          avatarUrl: "/generated/avatar-alex.svg",
+          settings: {
+            create: {
+              dailyGoalMinutes: 45,
+              weeklyGoalDays: 6,
+              preferredFontSize: 19,
+              preferredTheme: "sepia",
+              reminderEnabled: true,
+              reminderTime: "21:00",
+              language: "zh-CN"
+            }
+          }
+        }
+      });
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        username: DEMO_USERNAME,
-        passwordHash: "demo-password-hash",
-        displayName: "Alex",
-        avatarUrl: "/generated/avatar-alex.svg",
-        settings: {
-          create: {
-            dailyGoalMinutes: 45,
-            weeklyGoalDays: 6,
-            preferredFontSize: 19,
-            preferredTheme: "sepia",
-            reminderEnabled: true,
-            reminderTime: "21:00",
-            language: "zh-CN"
+    await this.ensureBooks(user.id);
+    await this.ensureWords(user.id);
+    await this.ensureNotes(user.id);
+    await this.ensureSessions(user.id);
+    return user;
+  }
+
+  private async ensureBooks(userId: string) {
+    for (const item of CATALOG_BOOKS) {
+      const existing = await this.prisma.book.findFirst({
+        where: { userId, title: item.title, author: item.author },
+        include: { chapters: true }
+      });
+
+      const book =
+        existing ??
+        (await this.prisma.book.create({
+          data: {
+            userId,
+            title: item.title,
+            author: item.author,
+            coverUrl: item.coverUrl,
+            category: item.category,
+            level: item.level,
+            description: item.description,
+            totalPages: item.totalPages,
+            currentPage: item.initialCurrentPage,
+            status: item.initialStatus
           }
-        },
-        books: {
-          create: [
-            {
-              title: "The First Morning",
-              author: "Virginia Woolf",
-              coverUrl: "/generated/cover-first-morning.svg",
-              category: "经典文学",
-              level: "B2",
-              description: "在日常晨光里感受语言与意识流的细腻变化。",
-              totalPages: 220,
-              currentPage: 55,
-              status: "reading",
-              startedAt: new Date("2026-05-01T08:10:00.000Z"),
-              lastReadAt: new Date("2026-05-20T01:32:00.000Z")
-            },
-            {
-              title: "Pride and Prejudice",
-              author: "Jane Austen",
-              coverUrl: "/generated/cover-pride.svg",
-              category: "经典名著",
-              level: "B1",
-              description: "机智对白与社会观察并存的经典长篇。",
-              totalPages: 390,
-              currentPage: 390,
-              status: "finished",
-              rating: 5,
-              startedAt: new Date("2026-02-02T02:10:00.000Z"),
-              finishedAt: new Date("2026-04-10T11:00:00.000Z"),
-              lastReadAt: new Date("2026-04-10T11:00:00.000Z")
-            },
-            {
-              title: "The Secret Garden",
-              author: "Frances Hodgson Burnett",
-              coverUrl: "/generated/cover-garden.svg",
-              category: "儿童文学",
-              level: "A2",
-              description: "温柔治愈的成长故事，词汇友好。",
-              totalPages: 280,
-              currentPage: 132,
-              status: "reading",
-              startedAt: new Date("2026-05-07T09:30:00.000Z"),
-              lastReadAt: new Date("2026-05-19T13:22:00.000Z")
-            },
-            {
-              title: "The Little Prince",
-              author: "Antoine de Saint-Exupery",
-              coverUrl: "/generated/cover-prince.svg",
-              category: "童话寓言",
-              level: "A2",
-              description: "短句清晰，适合精读与表达练习。",
-              totalPages: 180,
-              currentPage: 20,
-              status: "reading",
-              startedAt: new Date("2026-05-18T06:00:00.000Z"),
-              lastReadAt: new Date("2026-05-18T06:35:00.000Z")
+        }));
+
+      if (existing) {
+        await this.prisma.book.update({
+          where: { id: existing.id },
+          data: {
+            coverUrl: item.coverUrl,
+            category: item.category,
+            level: item.level,
+            description: item.description,
+            totalPages: item.totalPages
+          }
+        });
+      }
+
+      if (item.chapters.length === 0) continue;
+
+      for (const chapter of item.chapters) {
+        const storedChapter = await this.prisma.chapter.upsert({
+          where: {
+            bookId_order: {
+              bookId: book.id,
+              order: chapter.order
             }
-          ]
-        },
-        words: {
-          create: [
-            { word: "serene", meaning: "平静的；安宁的", phonetic: "/s??ri?n/", familiarity: 3, reviewCount: 4, mastered: false },
-            { word: "flicker", meaning: "闪烁；摇曳", phonetic: "/?fl?k?r/", familiarity: 2, reviewCount: 2, mastered: false },
-            { word: "meadow", meaning: "草地；牧场", phonetic: "/?medo?/", familiarity: 4, reviewCount: 6, mastered: true },
-            { word: "persist", meaning: "坚持；持续存在", phonetic: "/p?r?s?st/", familiarity: 3, reviewCount: 5, mastered: false }
-          ]
-        },
-        notes: {
-          create: [
-            {
-              title: "The First Morning Chapter 1",
-              content: "第一段通过清晨意象建立叙事节奏，建议积累时间与天气表达。",
-              tags: ["精读", "意象"],
-              pinned: true
+          },
+          update: {
+            title: chapter.title
+          },
+          create: {
+            bookId: book.id,
+            title: chapter.title,
+            order: chapter.order
+          }
+        });
+
+        const sentenceOrders = chapter.sentences.map((sentence) => sentence.order);
+        await this.prisma.sentence.deleteMany({
+          where: {
+            chapterId: storedChapter.id,
+            order: { notIn: sentenceOrders }
+          }
+        });
+
+        for (const sentence of chapter.sentences) {
+          await this.prisma.sentence.upsert({
+            where: {
+              chapterId_order: {
+                chapterId: storedChapter.id,
+                order: sentence.order
+              }
             },
-            {
-              title: "Austen 对话句式",
-              content: "关注让步结构与反问句，适合口语复述。",
-              tags: ["句式", "口语"],
-              pinned: false
+            update: {
+              english: sentence.english,
+              chinese: sentence.chinese
+            },
+            create: {
+              chapterId: storedChapter.id,
+              order: sentence.order,
+              english: sentence.english,
+              chinese: sentence.chinese
             }
-          ]
-        },
-        sessions: {
-          create: [
-            { date: new Date("2026-05-14T11:30:00.000Z"), durationMin: 65, sentencesRead: 132, wordsLearned: 12 },
-            { date: new Date("2026-05-15T11:30:00.000Z"), durationMin: 42, sentencesRead: 96, wordsLearned: 9 },
-            { date: new Date("2026-05-16T11:30:00.000Z"), durationMin: 38, sentencesRead: 81, wordsLearned: 6 },
-            { date: new Date("2026-05-17T11:30:00.000Z"), durationMin: 76, sentencesRead: 153, wordsLearned: 14 },
-            { date: new Date("2026-05-18T11:30:00.000Z"), durationMin: 35, sentencesRead: 72, wordsLearned: 5 },
-            { date: new Date("2026-05-19T11:30:00.000Z"), durationMin: 50, sentencesRead: 113, wordsLearned: 10 },
-            { date: new Date("2026-05-20T11:30:00.000Z"), durationMin: 44, sentencesRead: 99, wordsLearned: 8 }
-          ]
+          });
         }
       }
-    });
+    }
+  }
 
-    return user;
+  private async ensureWords(userId: string) {
+    const existingCount = await this.prisma.vocabularyWord.count({ where: { userId } });
+    if (existingCount > 0) return;
+    await this.prisma.vocabularyWord.createMany({
+      data: [
+        { userId, word: "serene", meaning: "平静的，安宁的", phonetic: "/səˈriːn/", familiarity: 3, reviewCount: 4, mastered: false },
+        { userId, word: "flicker", meaning: "闪烁，摇曳", phonetic: "/ˈflɪkər/", familiarity: 2, reviewCount: 2, mastered: false },
+        { userId, word: "meadow", meaning: "草地，牧场", phonetic: "/ˈmedoʊ/", familiarity: 4, reviewCount: 6, mastered: true },
+        { userId, word: "persist", meaning: "坚持，持续存在", phonetic: "/pərˈsɪst/", familiarity: 3, reviewCount: 5, mastered: false }
+      ]
+    });
+  }
+
+  private async ensureNotes(userId: string) {
+    const existingCount = await this.prisma.note.count({ where: { userId } });
+    if (existingCount > 0) return;
+    await this.prisma.note.createMany({
+      data: [
+        {
+          userId,
+          title: "Secret Garden Chapter 1",
+          content: "关注人物外貌描写中的形容词组合，适合做口语复述。",
+          tags: ["精读", "人物描写"],
+          pinned: true
+        },
+        {
+          userId,
+          title: "Austen 对话句式",
+          content: "记录礼貌表达与反问句结构，便于迁移到写作。",
+          tags: ["句式", "写作"],
+          pinned: false
+        }
+      ]
+    });
+  }
+
+  private async ensureSessions(userId: string) {
+    const existingCount = await this.prisma.readingSession.count({ where: { userId } });
+    if (existingCount > 0) return;
+    await this.prisma.readingSession.createMany({
+      data: [
+        { userId, date: new Date("2026-05-14T11:30:00.000Z"), durationMin: 65, sentencesRead: 132, wordsLearned: 12 },
+        { userId, date: new Date("2026-05-15T11:30:00.000Z"), durationMin: 42, sentencesRead: 96, wordsLearned: 9 },
+        { userId, date: new Date("2026-05-16T11:30:00.000Z"), durationMin: 38, sentencesRead: 81, wordsLearned: 6 },
+        { userId, date: new Date("2026-05-17T11:30:00.000Z"), durationMin: 76, sentencesRead: 153, wordsLearned: 14 },
+        { userId, date: new Date("2026-05-18T11:30:00.000Z"), durationMin: 35, sentencesRead: 72, wordsLearned: 5 },
+        { userId, date: new Date("2026-05-19T11:30:00.000Z"), durationMin: 50, sentencesRead: 113, wordsLearned: 10 },
+        { userId, date: new Date("2026-05-20T11:30:00.000Z"), durationMin: 44, sentencesRead: 99, wordsLearned: 8 }
+      ]
+    });
   }
 
   async getDemoUserId() {

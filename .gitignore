@@ -2,4 +2,24 @@ node_modules
 .next
 dist
 .env
+.env.*
 *.log
+*.tsbuildinfo
+*.pyc
+__pycache__/
+
+# App-local dependencies and build output
+apps/*/node_modules/
+apps/*/dist/
+apps/*/.next/
+
+# Local translation models and caches
+apps/api/.argos-translate/
+apps/api/.hf-cache/
+
+# Python script cache
+apps/api/scripts/__pycache__/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

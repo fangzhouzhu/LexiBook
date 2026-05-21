@@ -2,21 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AudioLines,
   ChevronLeft,
-  Bookmark,
-  NotebookPen,
   Pause,
   Play,
   Repeat2,
   RotateCcw,
   SkipBack,
   SkipForward,
-  Sparkles,
-  Star,
   Volume2
 } from "lucide-react";
-import { saveReadingProgress } from "@/services/bookApi";
+import { getBookMarkdownRaw, saveReadingProgress, translateSentencesOffline } from "@/services/bookApi";
 import { getWordExplain } from "@/services/wordApi";
 import { useReaderStore } from "@/stores/readerStore";
 import type { ChapterReaderData, Sentence, WordExplain } from "@/types/reader";
@@ -33,7 +28,60 @@ function speak(text: string) {
   window.speechSynthesis.speak(utter);
 }
 
-export function BookReader({ data }: { data: ChapterReaderData }) {
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[_*`~[\]()"',;:!?./\\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitIntoSentences(text: string): string[] {
+  const normalized = text
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return [];
+
+  const matches = normalized.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) ?? [];
+  return matches.map((item) => item.trim()).filter(Boolean);
+}
+
+function markdownToSentences(markdown: string, fallback: Sentence[]): Sentence[] {
+  const paragraphs = markdown
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#") && !line.startsWith("```"))
+    .map((line) => line.replace(/^\d+[.)]\s+/, ""));
+
+  const chunks = splitIntoSentences(paragraphs.join(" "))
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item) => /[a-zA-Z]/.test(item));
+
+  if (!chunks.length) return fallback;
+
+  const firstFallback = fallback[0]?.english ? normalizeText(fallback[0].english) : "";
+  let startIndex = 0;
+  if (firstFallback) {
+    const found = chunks.findIndex((chunk) => {
+      const normalized = normalizeText(chunk);
+      return normalized.includes(firstFallback) || firstFallback.includes(normalized);
+    });
+    if (found >= 0) startIndex = found;
+  }
+
+  const aligned = chunks.slice(startIndex);
+  return aligned.map((english, index) => ({
+    id: `md-${index + 1}`,
+    order: index + 1,
+    english,
+    chinese: fallback[index]?.chinese ?? ""
+  }));
+}
+
+export function BookReader({ data, bookId }: { data: ChapterReaderData; bookId: string }) {
+  const PAGE_SIZE = 8;
   const { hoveredSentenceId, setHoveredSentence, activeSentenceId, setActiveSentence } = useReaderStore();
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [wordDetail, setWordDetail] = useState<WordExplain | null>(null);
@@ -45,7 +93,16 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
   const [volume, setVolume] = useState(0.46);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [wordAnchor, setWordAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const [markdownSentences, setMarkdownSentences] = useState<Sentence[] | null>(null);
+  const [runtimeTranslations, setRuntimeTranslations] = useState<Record<string, string>>({});
+  const requestedTranslationsRef = useRef<Set<string>>(new Set());
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const sentences = markdownSentences ?? data.sentences;
+  const pageCount = Math.max(1, Math.ceil(sentences.length / PAGE_SIZE));
+  const pageStart = currentPage * PAGE_SIZE;
+  const visibleSentences = sentences.slice(pageStart, pageStart + PAGE_SIZE);
 
   function closeWordDetail() {
     setSelectedWord(null);
@@ -53,6 +110,54 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
     setWordDetail(null);
     setWordLoading(false);
   }
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadMarkdown() {
+      try {
+        const markdown = await getBookMarkdownRaw(bookId);
+        if (!mounted) return;
+        setMarkdownSentences(markdownToSentences(markdown, data.sentences));
+      } catch {
+        if (!mounted) return;
+        setMarkdownSentences(null);
+      }
+    }
+    void loadMarkdown();
+    return () => {
+      mounted = false;
+    };
+  }, [bookId, data.sentences]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function fillVisibleTranslations() {
+      const translationWindow = sentences.slice(pageStart, pageStart + PAGE_SIZE * 3);
+      const pending = translationWindow.filter((item) => {
+        const hasBase = Boolean(item.chinese && item.chinese.trim());
+        const hasRuntime = Boolean(runtimeTranslations[item.id]?.trim());
+        const requested = requestedTranslationsRef.current.has(item.id);
+        return !hasBase && !hasRuntime && !requested;
+      });
+      if (!pending.length) return;
+      pending.forEach((item) => requestedTranslationsRef.current.add(item.id));
+      const translations = await translateSentencesOffline(pending.map((item) => item.english));
+      if (!mounted) return;
+      setRuntimeTranslations((prev) => {
+        const next = { ...prev };
+        pending.forEach((item, idx) => {
+          const value = translations[idx]?.trim();
+          if (value) next[item.id] = value;
+          if (!value) requestedTranslationsRef.current.delete(item.id);
+        });
+        return next;
+      });
+    }
+    void fillVisibleTranslations();
+    return () => {
+      mounted = false;
+    };
+  }, [pageStart, runtimeTranslations, sentences]);
 
   useEffect(() => {
     const key = `progress:${data.chapterId}`;
@@ -76,22 +181,29 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
 
   async function onSentenceClick(sentence: Sentence, index: number) {
     setActiveSentence(sentence.id);
-    const percent = Math.round(((index + 1) / data.sentences.length) * 100);
+    const percent = Math.round(((index + 1) / sentences.length) * 100);
     window.localStorage.setItem(`progress:${data.chapterId}`, sentence.id);
     await saveReadingProgress({ chapterId: data.chapterId, sentenceId: sentence.id, percent });
-    playText(sentence.english);
+    playText(sentence.english, index);
   }
 
   const activeIndex = useMemo(() => {
     if (!activeSentenceId) return 0;
-    const idx = data.sentences.findIndex((item) => item.id === activeSentenceId);
+    const idx = sentences.findIndex((item) => item.id === activeSentenceId);
     return idx < 0 ? 0 : idx;
-  }, [activeSentenceId, data.sentences]);
+  }, [activeSentenceId, sentences]);
+
+  useEffect(() => {
+    const targetPage = Math.floor(activeIndex / PAGE_SIZE);
+    if (targetPage !== currentPage) {
+      setCurrentPage(targetPage);
+    }
+  }, [activeIndex, currentPage]);
 
   const progressPercent = useMemo(() => {
-    if (data.sentences.length <= 1) return 0;
-    return Math.round((activeIndex / (data.sentences.length - 1)) * 100);
-  }, [activeIndex, data.sentences.length]);
+    if (sentences.length <= 1) return 0;
+    return Math.round((activeIndex / (sentences.length - 1)) * 100);
+  }, [activeIndex, sentences.length]);
 
   function stopPlayback() {
     if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -100,7 +212,7 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
     utteranceRef.current = null;
   }
 
-  function playText(text: string) {
+  function playText(text: string, index?: number) {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "en-US";
@@ -108,6 +220,20 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
     utter.rate = playbackRate;
     utter.onend = () => {
       utteranceRef.current = null;
+      if (!isPlaying || !autoplay) return;
+      if (sentenceLoop && index !== undefined) {
+        const sentence = sentences[index];
+        if (!sentence) return;
+        playText(sentence.english, index);
+        return;
+      }
+      if (index === undefined) return;
+      const nextIndex = index + 1;
+      if (nextIndex >= sentences.length) {
+        setIsPlaying(false);
+        return;
+      }
+      jumpToSentence(nextIndex);
     };
     utteranceRef.current = utter;
     window.speechSynthesis.cancel();
@@ -115,27 +241,11 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
   }
 
   function jumpToSentence(index: number) {
-    const nextIndex = Math.min(Math.max(index, 0), data.sentences.length - 1);
-    const nextSentence = data.sentences[nextIndex];
+    const nextIndex = Math.min(Math.max(index, 0), sentences.length - 1);
+    const nextSentence = sentences[nextIndex];
     if (!nextSentence) return;
     void onSentenceClick(nextSentence, nextIndex);
   }
-
-  useEffect(() => {
-    if (!isPlaying || !autoplay) return;
-    const timer = window.setTimeout(() => {
-      if (sentenceLoop) {
-        playText(data.sentences[activeIndex].english);
-        return;
-      }
-      if (activeIndex + 1 >= data.sentences.length) {
-        setIsPlaying(false);
-        return;
-      }
-      jumpToSentence(activeIndex + 1);
-    }, 3200);
-    return () => window.clearTimeout(timer);
-  }, [activeIndex, autoplay, data.sentences, isPlaying, sentenceLoop, playbackRate, volume]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -156,12 +266,12 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
       setIsPlaying(false);
       return;
     }
-    jumpToSentence(activeIndex);
     setIsPlaying(true);
+    jumpToSentence(activeIndex);
   }
 
   function onProgressChange(value: number) {
-    const nextIndex = Math.round((value / 100) * Math.max(data.sentences.length - 1, 1));
+    const nextIndex = Math.round((value / 100) * Math.max(sentences.length - 1, 1));
     jumpToSentence(nextIndex);
   }
 
@@ -171,6 +281,18 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
 
   function onNextSentence() {
     jumpToSentence(activeIndex + 1);
+  }
+
+  function flipToPage(nextPage: number) {
+    const target = Math.min(Math.max(nextPage, 0), pageCount - 1);
+    if (target === currentPage) return;
+    setIsFlipping(true);
+    setCurrentPage(target);
+    window.setTimeout(() => setIsFlipping(false), 280);
+    const nextSentence = sentences[target * PAGE_SIZE];
+    if (nextSentence) {
+      setActiveSentence(nextSentence.id);
+    }
   }
 
   function onRateToggle() {
@@ -183,13 +305,13 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
 
   return (
     <section
-      className="min-h-[calc(100vh-96px)] text-[#2c2118]"
+      className="h-[calc(100vh-96px)] overflow-hidden text-[#2c2118]"
       style={{
         background: "linear-gradient(180deg, rgba(245,239,228,0.92) 0%, rgba(239,230,214,0.92) 100%)"
       }}
     >
-      <div className="flex min-h-[calc(100vh-96px)] flex-col">
-        <header className="glass-card flex h-[76px] items-center rounded-[16px] px-7">
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="flex h-[76px] items-center px-7">
           <div className="flex min-w-0 items-center gap-4 text-[#3c2c20]">
             <button
               className="flex h-10 w-10 items-center justify-center rounded-full text-[#483324] transition hover:bg-[rgba(160,124,84,0.08)] hover:text-[#7b5524]"
@@ -206,10 +328,10 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
         </header>
 
         <div className="relative flex-1 overflow-hidden pb-28 pt-5">
-          <div className="mx-auto flex h-full min-h-[calc(100vh-256px)] w-full items-center justify-center pr-[92px]">
+          <div className="mx-auto flex h-full w-full items-center justify-center pr-[92px]">
             <div
               className="relative"
-              style={{ width: "min(1540px, calc(100vw - 316px))" }}
+              style={{ width: "min(1540px, calc(100% - 28px))" }}
             >
               <div className="pointer-events-none absolute inset-x-[6.2%] bottom-[8.5%] top-[12%] rounded-[40px] bg-[rgba(122,84,44,0.08)] blur-[22px]" />
               <div className="relative aspect-[1562/1007]">
@@ -220,29 +342,33 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
                   draggable={false}
                 />
 
-                <div className="absolute left-[11.8%] top-[14.8%] w-[76.6%]">
-                  <p className="mb-[1.8%] text-[clamp(14px,1vw,16px)] text-[#57473a]">Chapter 1</p>
-                  <div className="mb-[6.2%] flex items-center gap-3">
-                    <h3 className="text-[clamp(30px,2.25vw,46px)] font-medium leading-none tracking-[-0.02em] text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif]">{data.chapterTitle}</h3>
+                <div className="absolute left-[11.2%] top-[13.8%] w-[77.8%]">
+                  <p className="mb-[1.2%] text-[clamp(13px,0.9vw,15px)] text-[#57473a]">Chapter 1</p>
+                  <div className="mb-[3.6%] flex items-center gap-3">
+                    <h3 className="text-[clamp(26px,2.05vw,42px)] font-medium leading-none tracking-[-0.02em] text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif]">{data.chapterTitle}</h3>
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#b59773] text-[12px] text-[#a48563]">◔</span>
                   </div>
-                  <div className="grid grid-cols-[1fr_1fr] gap-x-[6.6%]">
-                    <div className="text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif]">
-                      {data.sentences.map((sentence, index) => {
+                  <div className="grid h-[57.5%] grid-cols-[1fr_1fr] gap-x-[5.8%]">
+                    <div
+                      className={`grid text-[#2f2419] [font-family:Georgia,'Times_New_Roman',serif] transition-all duration-300 ${isFlipping ? "opacity-40 -translate-x-1" : "opacity-100 translate-x-0"}`}
+                      style={{ gridTemplateRows: `repeat(${Math.max(visibleSentences.length, 1)}, minmax(0, 1fr))` }}
+                    >
+                      {visibleSentences.map((sentence, localIndex) => {
+                        const index = pageStart + localIndex;
                         const isHover = hoveredSentenceId === sentence.id;
                         const isActive = activeSentenceId === sentence.id;
                         return (
                           <div
                             key={sentence.id}
-                            className={`group mb-[4.25%] rounded-[10px] px-[10px] py-[10px] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
+                            className={`group flex min-h-0 items-start rounded-[8px] px-[8px] py-[4px] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
                             onMouseEnter={() => setHoveredSentence(sentence.id)}
                             onMouseLeave={() => setHoveredSentence(undefined)}
                           >
-                            <div className="flex items-start gap-3">
+                            <div className="flex w-full items-start gap-3">
                               <span
                                 data-sentence-text
-                                className="flex-1 cursor-pointer leading-[2.02]"
-                                style={{ fontSize: `clamp(15px, ${1.0 * fontScale}vw, 19px)` }}
+                                className="flex-1 cursor-pointer leading-[1.55]"
+                                style={{ fontSize: `clamp(14px, ${0.88 * fontScale}vw, 17px)` }}
                                 onClick={() => void onSentenceClick(sentence, index)}
                               >
                                 {tokenize(sentence.english).map((piece, i) => {
@@ -267,7 +393,7 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
                               </span>
                               <button
                                 className="mt-[2px] text-[#8b775e] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-[#6d5a49]"
-                                onClick={() => playText(sentence.english)}
+                                onClick={() => playText(sentence.english, index)}
                                 aria-label="播放句子发音"
                               >
                                 <Volume2 size={16} />
@@ -278,20 +404,20 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
                       })}
                     </div>
 
-                    <div className="relative pt-[0.1%] text-[#2f2419]">
-                      <button className="absolute right-[1.5%] top-[-1.2%] rounded p-2 text-[#8b775e] hover:bg-black/5">
-                      <Bookmark size={20} />
-                      </button>
-                      {data.sentences.map((sentence) => {
+                    <div
+                      className={`grid pt-[0.1%] text-[#2f2419] transition-all duration-300 ${isFlipping ? "opacity-40 translate-x-1" : "opacity-100 translate-x-0"}`}
+                      style={{ gridTemplateRows: `repeat(${Math.max(visibleSentences.length, 1)}, minmax(0, 1fr))` }}
+                    >
+                      {visibleSentences.map((sentence) => {
                         const isHover = hoveredSentenceId === sentence.id;
                         const isActive = activeSentenceId === sentence.id;
                         return (
                           <div
                             key={sentence.id}
-                            className={`mb-[4.25%] rounded-[10px] px-[10px] py-[10px] leading-[2.02] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
-                            style={{ fontSize: `clamp(15px, ${0.98 * fontScale}vw, 18px)` }}
+                            className={`flex min-h-0 items-start rounded-[8px] px-[8px] py-[4px] leading-[1.55] ${isHover || isActive ? "bg-[#f0dea7]" : ""}`}
+                            style={{ fontSize: `clamp(14px, ${0.84 * fontScale}vw, 16px)` }}
                           >
-                            {sentence.chinese}
+                            {sentence.chinese || runtimeTranslations[sentence.id] || "翻译中..."}
                           </div>
                         );
                       })}
@@ -300,22 +426,31 @@ export function BookReader({ data }: { data: ChapterReaderData }) {
                 </div>
               </div>
 
-              <p className="absolute bottom-[2.05%] left-1/2 -translate-x-1/2 text-[13px] text-[#f0dfc6]">{activeIndex + 1} / 20</p>
+              <p className="absolute bottom-[2.05%] left-[12.5%] text-[13px] text-[#f0dfc6]">Page {currentPage + 1} / {pageCount}</p>
+
+              <button
+                className="absolute left-[6.9%] top-1/2 -translate-y-1/2 rounded-full bg-[rgba(66,44,24,0.12)] px-3 py-2 text-[12px] text-[#6d5947] transition hover:bg-[rgba(66,44,24,0.20)]"
+                onClick={() => flipToPage(currentPage - 1)}
+                aria-label="上一页"
+              >
+                ‹
+              </button>
+              <button
+                className="absolute right-[6.9%] top-1/2 -translate-y-1/2 rounded-full bg-[rgba(66,44,24,0.12)] px-3 py-2 text-[12px] text-[#6d5947] transition hover:bg-[rgba(66,44,24,0.20)]"
+                onClick={() => flipToPage(currentPage + 1)}
+                aria-label="下一页"
+              >
+                ›
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      <aside className="fixed right-[18px] top-1/2 z-20 -translate-y-1/2 rounded-[16px] border border-[rgba(143,113,78,0.18)] bg-[rgba(255,251,245,0.82)] p-[2px] text-[#6c5645] shadow-[0_14px_28px_rgba(61,39,18,0.08)] backdrop-blur-md">
-        <div className="flex flex-col gap-2">
-          <button className="flex min-w-[86px] flex-col items-center gap-3 rounded-t-[22px] border-b border-[rgba(143,113,78,0.12)] px-3 py-6 text-[13px] hover:bg-[rgba(160,124,84,0.06)]"><Sparkles size={19} /><span>长难分析</span></button>
-          <button className="flex flex-col items-center gap-3 border-b border-[rgba(143,113,78,0.12)] px-3 py-6 text-[13px] hover:bg-[rgba(160,124,84,0.06)]"><NotebookPen size={19} /><span>笔记</span></button>
-          <button className="flex flex-col items-center gap-3 border-b border-[rgba(143,113,78,0.12)] px-3 py-6 text-[13px] hover:bg-[rgba(160,124,84,0.06)]"><AudioLines size={19} /><span>跟读</span></button>
-          <button className="flex flex-col items-center gap-3 rounded-b-[22px] px-3 py-6 text-[13px] hover:bg-[rgba(160,124,84,0.06)]"><Star size={19} /><span>收藏</span></button>
-        </div>
-      </aside>
-
-      <footer className="fixed bottom-[18px] left-[258px] right-[30px] z-20 rounded-[28px] border border-[rgba(143,113,78,0.16)] bg-[rgba(255,250,244,0.8)] px-5 py-[10px] text-[#6c5645] shadow-[0_14px_28px_rgba(61,39,18,0.08)] backdrop-blur-md">
+      <footer
+        className="fixed bottom-[18px] z-20 rounded-[28px] border border-[rgba(143,113,78,0.16)] bg-[rgba(255,250,244,0.8)] px-5 py-[10px] text-[#6c5645] shadow-[0_14px_28px_rgba(61,39,18,0.08)] backdrop-blur-md"
+        style={{ left: "max(266px, 2.25rem)", right: "2.25rem", maxWidth: "calc(100vw - 360px)", margin: "0 auto" }}
+      >
         <div className="flex items-center gap-3">
           <button
             className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-[rgba(143,113,78,0.18)] text-[#6d5947]"

@@ -1,33 +1,61 @@
 import { Injectable } from "@nestjs/common";
-
-type Sentence = { id: string; order: number; english: string; chinese: string };
+import { LexiService } from "./lexi.service";
+import { OfflineTranslateService } from "./offline-translate.service";
+import { PrismaService } from "./prisma.service";
 
 @Injectable()
 export class ReaderService {
-  private readonly chapter = {
-    chapterId: "ch1",
-    chapterTitle: "The First Morning",
-    bookTitle: "LexiBook Demo Reader",
-    sentences: [
-      { id: "s1", order: 1, english: "I woke up before sunrise and opened the old window.", chinese: "我在日出前醒来，打开了那扇旧窗。" },
-      { id: "s2", order: 2, english: "The city was quiet, and the street lights were still on.", chinese: "城市很安静，街灯依然亮着。" },
-      { id: "s3", order: 3, english: "A cold wind moved across the room and touched my face.", chinese: "一阵冷风穿过房间，拂过我的脸。" },
-      { id: "s4", order: 4, english: "I made a cup of tea and started reading a short story.", chinese: "我泡了一杯茶，开始读一个短篇故事。" },
-      { id: "s5", order: 5, english: "Every unfamiliar word felt like a small locked door.", chinese: "每个生词都像一扇上锁的小门。" }
-    ] satisfies Sentence[]
-  };
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lexiService: LexiService,
+    private readonly offlineTranslateService: OfflineTranslateService
+  ) {}
 
   private readonly dictionary: Record<string, { chinese: string; english: string; phonetic?: string; example?: string }> = {
     sunrise: { chinese: "日出", english: "the time when the sun first appears", phonetic: "/ˈsʌn.raɪz/" },
     unfamiliar: { chinese: "不熟悉的", english: "not known well", phonetic: "/ˌʌn.fəˈmɪl.jɚ/" },
-    locked: { chinese: "上锁的", english: "closed with a lock", phonetic: "/lɑːkt/" },
+    locked: { chinese: "上锁的", english: "closed with a lock", phonetic: "/lɒkt/" },
     story: { chinese: "故事", english: "a description of events", phonetic: "/ˈstɔːr.i/" }
   };
 
   private readonly progress = new Map<string, { sentenceId: string; percent: number }>();
+  private readonly warmingChapters = new Set<string>();
 
-  getReaderData(chapterId: string) {
-    return { ...this.chapter, chapterId };
+  async getReaderData(chapterId: string) {
+    await this.lexiService.ensureSeedData();
+    const chapter = await this.prisma.chapter.findUnique({
+      where: { id: chapterId },
+      include: { book: true, sentences: { orderBy: { order: "asc" } } }
+    });
+
+    if (!chapter) {
+      return {
+        chapterId,
+        chapterTitle: "Chapter",
+        bookTitle: "LexiBook",
+        sentences: []
+      };
+    }
+
+    await this.fillMissingChinese(chapter.id, chapter.sentences, 48);
+    const freshSentences = await this.prisma.sentence.findMany({
+      where: { chapterId: chapter.id },
+      orderBy: { order: "asc" }
+    });
+
+    void this.warmChapterTranslations(chapter.id);
+
+    return {
+      chapterId: chapter.id,
+      chapterTitle: chapter.title,
+      bookTitle: chapter.book.title,
+      sentences: freshSentences.map((item) => ({
+        id: item.id,
+        order: item.order,
+        english: item.english,
+        chinese: item.chinese
+      }))
+    };
   }
 
   getWord(word: string) {
@@ -51,5 +79,45 @@ export class ReaderService {
 
   getProgress(chapterId: string) {
     return this.progress.get(chapterId) ?? { sentenceId: null, percent: 0 };
+  }
+
+  async translateBatch(texts: string[]) {
+    const translations = await this.offlineTranslateService.translateEnToZhBatch(texts);
+    return { translations };
+  }
+
+  private async fillMissingChinese(
+    chapterId: string,
+    sentences: Array<{ id: string; english: string; chinese: string }>,
+    limit = 80
+  ) {
+    const missing = sentences.filter((item) => !item.chinese || !item.chinese.trim()).slice(0, limit);
+    if (!missing.length) return;
+
+    const translations = await this.offlineTranslateService.translateEnToZhBatch(missing.map((item) => item.english));
+    for (const [index, sentence] of missing.entries()) {
+      const translated = translations[index]?.trim();
+      if (!translated) continue;
+      await this.prisma.sentence.update({
+        where: { id: sentence.id },
+        data: { chinese: translated }
+      });
+    }
+  }
+
+  private async warmChapterTranslations(chapterId: string) {
+    if (this.warmingChapters.has(chapterId)) return;
+    this.warmingChapters.add(chapterId);
+
+    try {
+      const sentences = await this.prisma.sentence.findMany({
+        where: { chapterId },
+        orderBy: { order: "asc" },
+        take: 120
+      });
+      await this.fillMissingChinese(chapterId, sentences, 120);
+    } finally {
+      this.warmingChapters.delete(chapterId);
+    }
   }
 }

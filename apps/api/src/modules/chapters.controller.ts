@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { ReaderService } from "./reader.service";
 
 @Controller("chapters")
@@ -13,5 +13,10 @@ export class ChaptersController {
   @Get(":id/reader-data")
   getReaderData(@Param("id") id: string) {
     return this.readerService.getReaderData(id);
+  }
+
+  @Post("translate")
+  translateBatch(@Body() body: { texts: string[] }) {
+    return this.readerService.translateBatch(body.texts ?? []);
   }
 }
