@@ -75,6 +75,39 @@ export class AuthService {
     };
   }
 
+  async resetPassword(username: string, password: string) {
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername || !password) {
+      throw new BadRequestException("用户名和新密码不能为空");
+    }
+    if (password.length < 6) {
+      throw new BadRequestException("密码至少 6 位");
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { username: normalizedUsername }
+    });
+
+    if (!user) {
+      throw new BadRequestException("用户不存在");
+    }
+
+    const passwordHash = await hash(password, 10);
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash }
+    });
+
+    return {
+      user: {
+        id: updated.id,
+        username: updated.username,
+        createdAt: updated.createdAt
+      },
+      token: this.signToken(updated)
+    };
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId }

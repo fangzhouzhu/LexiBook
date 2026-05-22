@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, CalendarCheck, ChevronLeft, ChevronRight, Clock3, Flame, MoreVertical, Trash2, Info } from "lucide-react";
+import { BookOpen, CalendarCheck, ChevronLeft, ChevronRight, Clock3, Flame, MoreVertical, Trash2, Info, Star, Volume2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { BookCover } from "@/components/common/BookCover";
 import { getStoredUser } from "@/services/authApi";
 
 type MenuKey = "home" | "bookshelf" | "vocabulary" | "notes" | "statistics" | "settings";
@@ -25,6 +26,11 @@ type ShelfBook = {
 type DeleteCandidate = {
   id: string;
   title: string;
+};
+
+type FavoriteDeleteCandidate = {
+  id: string;
+  word: string;
 };
 type DailyStat = {
   key: string;
@@ -108,12 +114,19 @@ function formatHours(minutes: number) {
   return mins ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
+function speakWord(word: string) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  const utter = new SpeechSynthesisUtterance(word);
+  utter.lang = "en-US";
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utter);
+}
+
 export default function DashboardPage() {
   const searchParams = useSearchParams();
   const [active, setActive] = useState<MenuKey>("home");
   const [data, setData] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
-  const [wordForm, setWordForm] = useState({ word: "", meaning: "", phonetic: "" });
   const [noteForm, setNoteForm] = useState({ title: "", content: "", tags: "" });
   const [viewerName, setViewerName] = useState<string | null>(null);
   const [shelfFilter, setShelfFilter] = useState<ShelfFilter>("all");
@@ -122,6 +135,7 @@ export default function DashboardPage() {
   const [detailBook, setDetailBook] = useState<ShelfBook | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<DeleteCandidate | null>(null);
+  const [favoriteDeleteCandidate, setFavoriteDeleteCandidate] = useState<FavoriteDeleteCandidate | null>(null);
   const shelfMeasureRef = useRef<HTMLDivElement | null>(null);
   const [shelfColumns, setShelfColumns] = useState(5);
 
@@ -265,6 +279,11 @@ export default function DashboardPage() {
     await load(active, { silent: true });
   }
 
+  async function removeFavoriteWord(wordId: string) {
+    await fetch(`${API_BASE}/vocabulary/${wordId}`, { method: "DELETE" });
+    await load("vocabulary", { silent: true });
+  }
+
   return (
     <div className="space-y-5">
       {loading ? (
@@ -331,7 +350,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="mt-6 grid gap-6 md:grid-cols-[128px_1fr]">
-                  <img
+                  <BookCover
                     src={home.continueReading.coverUrl}
                     alt={home.continueReading.title}
                     className="h-44 w-32 rounded-[10px] object-cover shadow-[0_10px_22px_rgba(56,39,22,0.10)]"
@@ -387,7 +406,7 @@ export default function DashboardPage() {
                   {(home.recommendations ?? []).map((book) => (
                     <article key={book.id}>
                       <div className="overflow-hidden rounded-[10px] border border-[var(--border)] bg-white/58 p-2 shadow-[0_8px_16px_rgba(61,39,18,0.04)]">
-                        <img src={book.coverUrl} alt={book.title} className="h-48 w-full rounded-[10px] object-cover" />
+                        <BookCover src={book.coverUrl} alt={book.title} className="h-48 w-full rounded-[10px] object-cover" />
                       </div>
                       <h3 className="mt-4 text-[16px] font-semibold leading-6 text-[#2f2318]">{book.title}</h3>
                       <p className="mt-1 text-[14px] text-[#786755]">{book.author}</p>
@@ -432,9 +451,9 @@ export default function DashboardPage() {
                   <p className="text-[13px] text-[#8b7764]">累计阅读</p>
                 </div>
                 <div className="rounded-[14px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.82)_0%,rgba(250,244,235,0.58)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-                  <p className="text-[13px] text-[#8b7764]">掌握单词</p>
+                  <p className="text-[13px] text-[#8b7764]">收藏单词</p>
                   <p className="mt-3 text-[36px] font-semibold text-[#2f2318]">{home.stats.vocabularyCount}</p>
-                  <p className="text-[13px] text-[#8b7764]">已标记掌握</p>
+                  <p className="text-[13px] text-[#8b7764]">已加入收藏</p>
                 </div>
               </div>
 
@@ -550,7 +569,7 @@ export default function DashboardPage() {
                             <Link href={`/books/${book.id}/chapters/${book.firstChapterId}`} className="mx-auto block w-[156px]">
                               <div className="relative rounded-[8px] shadow-[0_20px_26px_rgba(55,34,16,0.30)] transition duration-200 group-hover:-translate-y-1 group-hover:shadow-[0_24px_36px_rgba(55,34,16,0.36)]">
                                 <div className="absolute inset-y-1 left-0 z-10 w-[8px] rounded-l-[7px] bg-[linear-gradient(90deg,rgba(18,11,7,0.32),rgba(255,255,255,0.08))]" />
-                                <img src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[8px] object-cover" />
+                                <BookCover src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[8px] object-cover" />
                                 <span className="absolute bottom-3 right-3 rounded-full bg-[rgba(35,24,16,0.78)] px-2 py-1 text-[11px] font-semibold text-white shadow-[0_4px_10px_rgba(0,0,0,0.18)]">
                                   {book.status === "finished" ? "已完成" : `${percent}%`}
                                 </span>
@@ -624,32 +643,49 @@ export default function DashboardPage() {
       ) : null}
 
       {active === "vocabulary" ? (
-        <SectionShell title="生词本" subtitle="把值得复习的词语沉淀下来，慢慢变成你自己的表达。">
-          <div className="flex flex-wrap gap-3">
-            <input placeholder="单词" className="rounded-[10px] border border-[var(--border)] bg-white/70 px-4 py-3" value={wordForm.word} onChange={(e) => setWordForm({ ...wordForm, word: e.target.value })} />
-            <input placeholder="释义" className="rounded-[10px] border border-[var(--border)] bg-white/70 px-4 py-3" value={wordForm.meaning} onChange={(e) => setWordForm({ ...wordForm, meaning: e.target.value })} />
-            <input placeholder="音标" className="rounded-[10px] border border-[var(--border)] bg-white/70 px-4 py-3" value={wordForm.phonetic} onChange={(e) => setWordForm({ ...wordForm, phonetic: e.target.value })} />
-            <button onClick={() => void post("/vocabulary", wordForm)} className="rounded-[10px] bg-[linear-gradient(135deg,#9c6a2f_0%,#b57a39_100%)] px-5 py-3 font-semibold text-white">
-              添加
-            </button>
-          </div>
-          <div className="mt-6 space-y-3">
+        <SectionShell title="收藏" subtitle="从阅读器里点击单词旁的五角星收藏，集中复习释义、解释和原文语境。">
+          <div className="grid gap-4 lg:grid-cols-2">
             {words.map((word: any) => (
-              <div key={word.id} className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-display text-[28px] text-[#2f2318]">
-                      {word.word}
-                      <span className="ml-2 font-sans text-sm text-[#8b7764]">{word.phonetic}</span>
-                    </p>
-                    <p className="mt-1 text-[15px] text-[#665647]">{word.meaning}</p>
+              <article key={word.id} className="rounded-[12px] border border-[var(--border)] bg-white/58 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Star size={18} className="shrink-0 text-[#b57a39]" />
+                      <p className="font-display text-[30px] leading-none text-[#2f2318]">{word.word}</p>
+                      {word.phonetic ? <span className="text-sm text-[#8b7764]">{word.phonetic}</span> : null}
+                      <button className="text-[#7b624b] hover:text-[#8f5f2b]" onClick={() => speakWord(word.word)} aria-label="播放发音">
+                        <Volume2 size={16} />
+                      </button>
+                    </div>
+                    <p className="mt-4 text-[15px] leading-7 text-[#4b3a2c]">{word.meaning}</p>
+                    {word.sentence ? (
+                      <div className="mt-4 rounded-[10px] border border-[rgba(151,118,83,0.14)] bg-white/55 px-4 py-3">
+                        <p className="text-[12px] font-semibold text-[#8f6b45]">{word.chapterTitle ?? "原文语境"}</p>
+                        <p className="mt-2 text-[13px] leading-6 text-[#6a5848]">{word.sentence}</p>
+                      </div>
+                    ) : null}
                   </div>
+                  <button
+                    onClick={() => setFavoriteDeleteCandidate({ id: word.id, word: word.word })}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[rgba(202,111,58,0.18)] text-[#9b4f2b] hover:bg-[rgba(202,111,58,0.08)]"
+                    aria-label="取消收藏"
+                    title="取消收藏"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+                <div className="mt-5 flex justify-end">
                   <button onClick={() => void patch(`/vocabulary/${word.id}/mastered`, { mastered: !word.mastered })} className="rounded-[10px] border border-[var(--border-strong)] px-4 py-2 text-sm text-[#7a4d24]">
                     {word.mastered ? "已掌握" : "标记掌握"}
                   </button>
                 </div>
-              </div>
+              </article>
             ))}
+            {!words.length ? (
+              <div className="lg:col-span-2 flex h-[220px] items-center justify-center rounded-[14px] border border-dashed border-[rgba(151,118,83,0.24)] bg-white/42 text-[14px] text-[#8b7764]">
+                暂无收藏。阅读时点击单词，再点五角星即可加入这里。
+              </div>
+            ) : null}
           </div>
         </SectionShell>
       ) : null}
@@ -823,7 +859,7 @@ export default function DashboardPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="grid gap-5 sm:grid-cols-[128px_1fr]">
-              <img src={detailBook.coverUrl} alt={detailBook.title} className="aspect-[3/4] w-32 rounded-[8px] object-cover shadow-[0_12px_24px_rgba(55,34,16,0.16)]" />
+              <BookCover src={detailBook.coverUrl} alt={detailBook.title} className="aspect-[3/4] w-32 rounded-[8px] object-cover shadow-[0_12px_24px_rgba(55,34,16,0.16)]" />
               <div>
                 <h2 className="text-[24px] font-semibold leading-7 text-[#2f2318]">{detailBook.title}</h2>
                 <p className="mt-1 text-[14px] text-[#7c6856]">{detailBook.author}</p>
@@ -874,9 +910,32 @@ export default function DashboardPage() {
           </section>
         </div>
       ) : null}
+
+      {favoriteDeleteCandidate ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(32,22,15,0.26)] px-6" onClick={() => setFavoriteDeleteCandidate(null)}>
+          <section
+            className="w-full max-w-[420px] rounded-[10px] border border-[rgba(151,118,83,0.18)] bg-[#fffdf8] p-5 shadow-[0_24px_60px_rgba(48,30,16,0.22)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-[18px] font-semibold text-[#2f2318]">确认取消收藏</h3>
+            <p className="mt-2 text-[14px] leading-6 text-[#5f5042]">确定要从收藏中移除 “{favoriteDeleteCandidate.word}” 吗？</p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button className="rounded-[8px] border border-[var(--border)] px-4 py-2 text-[13px] text-[#6c5645]" onClick={() => setFavoriteDeleteCandidate(null)}>
+                取消
+              </button>
+              <button
+                className="rounded-[8px] border border-[rgba(202,111,58,0.22)] px-4 py-2 text-[13px] text-[#9b4f2b]"
+                onClick={() => {
+                  void removeFavoriteWord(favoriteDeleteCandidate.id);
+                  setFavoriteDeleteCandidate(null);
+                }}
+              >
+                确认移除
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
-
-
-

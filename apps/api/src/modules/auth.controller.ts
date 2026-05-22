@@ -7,6 +7,11 @@ type AuthBody = {
   password: string;
 };
 
+type ResetPasswordBody = {
+  username: string;
+  password: string;
+};
+
 @Controller("auth")
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -19,6 +24,11 @@ export class AuthController {
   @Post("login")
   login(@Body() body: AuthBody) {
     return this.authService.login(body.username, body.password);
+  }
+
+  @Post("reset-password")
+  resetPassword(@Body() body: ResetPasswordBody) {
+    return this.authService.resetPassword(body.username, body.password);
   }
 
   @UseGuards(JwtAuthGuard)

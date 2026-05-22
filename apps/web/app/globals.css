@@ -87,9 +87,10 @@ textarea {
 
 .auth-book::before {
   content: "";
+  min-height: 100%;
   background:
-    linear-gradient(180deg, rgba(102, 66, 34, 0.22), rgba(102, 66, 34, 0.12)),
-    url("/generated/hero-open-book.svg") center/cover no-repeat;
+    linear-gradient(180deg, rgba(53, 35, 21, 0.04), rgba(53, 35, 21, 0.16)),
+    url("/generated/auth-reading-room.png") center/cover no-repeat;
 }
 
 .auth-card {
@@ -191,6 +192,8 @@ textarea {
 }
 
 .auth-link-btn {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   color: var(--accent);

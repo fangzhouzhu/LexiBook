@@ -13,10 +13,10 @@ import {
   LogOut,
   NotebookPen,
   Settings,
-  Sparkles,
+  Star,
   UserCircle2
 } from "lucide-react";
-import { clearAuth, getCurrentUser, getStoredUser, type AuthUser } from "@/services/authApi";
+import { clearAuth, getCurrentUser, getStoredUser, getToken, type AuthUser } from "@/services/authApi";
 
 type ShellUser = {
   displayName: string;
@@ -27,7 +27,7 @@ const menu = [
   { key: "home", label: "首页", icon: Home, href: "/" },
   { key: "bookshelf", label: "书架", icon: BookOpen, href: "/?tab=bookshelf" },
   { key: "bookstore", label: "书城", icon: Library, href: "/bookstore" },
-  { key: "vocabulary", label: "生词本", icon: Sparkles, href: "/?tab=vocabulary" },
+  { key: "vocabulary", label: "收藏", icon: Star, href: "/?tab=vocabulary" },
   { key: "notes", label: "笔记", icon: NotebookPen, href: "/?tab=notes" },
   { key: "statistics", label: "统计", icon: BarChart3, href: "/?tab=statistics" }
 ] as const;
@@ -54,15 +54,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<ShellUser>(mapUser(null));
   const [menuOpen, setMenuOpen] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
 
-  const isAuthPage = pathname === "/login" || pathname === "/register";
+  const isAuthPage = pathname === "/login" || pathname === "/register" || pathname === "/forgot-password";
 
   useEffect(() => {
-    if (isAuthPage) return;
+    if (isAuthPage) {
+      setAuthChecking(false);
+      return;
+    }
 
     let cancelled = false;
 
     async function loadUser() {
+      setAuthChecking(true);
+      const token = getToken();
+      if (!token) {
+        clearAuth();
+        router.replace("/login");
+        return;
+      }
+
       const stored = getStoredUser();
       if (stored && !cancelled) {
         setUser(mapUser(stored));
@@ -72,11 +84,23 @@ export function AppShell({ children }: { children: ReactNode }) {
         const current = await getCurrentUser();
         if (!cancelled && current) {
           setUser(mapUser(current));
+          setAuthChecking(false);
+          return;
         }
       } catch {
         if (!cancelled) {
-          setUser(mapUser(stored));
+          clearAuth();
+          setUser(mapUser(null));
+          router.replace("/login");
+          return;
         }
+      }
+
+      if (!cancelled) {
+        clearAuth();
+        setUser(mapUser(null));
+        router.replace("/login");
+        return;
       }
     }
 
@@ -85,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isAuthPage, pathname]);
+  }, [isAuthPage, pathname, router]);
 
   useEffect(() => {
     function handleClickOutside() {
@@ -99,6 +123,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (isAuthPage) {
     return <>{children}</>;
+  }
+
+  if (authChecking) {
+    return (
+      <div className="flex min-h-screen min-w-[1440px] items-center justify-center bg-[#f8f1e7] text-[15px] text-[#7b6957]">
+        正在验证登录状态...
+      </div>
+    );
   }
 
   const currentTab = searchParams.get("tab");

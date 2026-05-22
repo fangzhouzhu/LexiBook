@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+﻿import { Injectable } from "@nestjs/common";
 import { LexiService } from "./lexi.service";
 import { OfflineTranslateService } from "./offline-translate.service";
 import { PrismaService } from "./prisma.service";
@@ -11,11 +11,11 @@ export class ReaderService {
     private readonly offlineTranslateService: OfflineTranslateService
   ) {}
 
-  private readonly dictionary: Record<string, { chinese: string; english: string; phonetic?: string; example?: string }> = {
-    sunrise: { chinese: "日出", english: "the time when the sun first appears", phonetic: "/ˈsʌn.raɪz/" },
-    unfamiliar: { chinese: "不熟悉的", english: "not known well", phonetic: "/ˌʌn.fəˈmɪl.jɚ/" },
-    locked: { chinese: "上锁的", english: "closed with a lock", phonetic: "/lɒkt/" },
-    story: { chinese: "故事", english: "a description of events", phonetic: "/ˈstɔːr.i/" }
+  private readonly dictionary: Record<string, { chinese: string; english: string; phonetic?: string; partOfSpeech?: string; example?: string }> = {
+    sunrise: { chinese: "日出；朝阳", english: "the time when the sun first appears", phonetic: "/sunrise/", partOfSpeech: "noun" },
+    unfamiliar: { chinese: "不熟悉的；陌生的", english: "not known well", phonetic: "/unfamiliar/", partOfSpeech: "adjective" },
+    locked: { chinese: "上锁的；被锁住的", english: "closed with a lock", phonetic: "/locked/", partOfSpeech: "adjective" },
+    story: { chinese: "故事；叙述；情节", english: "a description of events", phonetic: "/story/", partOfSpeech: "noun" }
   };
 
   private readonly progress = new Map<string, { sentenceId: string; percent: number }>();
@@ -25,7 +25,17 @@ export class ReaderService {
     await this.lexiService.ensureSeedData();
     const chapter = await this.prisma.chapter.findUnique({
       where: { id: chapterId },
-      include: { book: true, sentences: { orderBy: { order: "asc" } } }
+      include: {
+        book: {
+          include: {
+            chapters: {
+              orderBy: { order: "asc" },
+              select: { id: true, title: true, order: true }
+            }
+          }
+        },
+        sentences: { orderBy: { order: "asc" } }
+      }
     });
 
     if (!chapter) {
@@ -33,6 +43,7 @@ export class ReaderService {
         chapterId,
         chapterTitle: "Chapter",
         bookTitle: "LexiBook",
+        chapters: [],
         sentences: []
       };
     }
@@ -49,6 +60,11 @@ export class ReaderService {
       chapterId: chapter.id,
       chapterTitle: chapter.title,
       bookTitle: chapter.book.title,
+      chapters: chapter.book.chapters.map((item) => ({
+        id: item.id,
+        title: item.title,
+        order: item.order
+      })),
       sentences: freshSentences.map((item) => ({
         id: item.id,
         order: item.order,
@@ -58,16 +74,30 @@ export class ReaderService {
     };
   }
 
-  getWord(word: string) {
+  async getWord(word: string) {
     const normalized = word.toLowerCase();
+    if (normalized === "heartache" || normalized === "heartaches") {
+      return {
+        word: normalized,
+        chinese: "心痛；悲伤；痛苦",
+        english: "a feeling of great sadness or emotional pain",
+        phonetic: "/heartache/",
+        partOfSpeech: "noun",
+        example: "The heartaches and nightmares are left out."
+      };
+    }
+
     const hit = this.dictionary[normalized];
     if (hit) {
-      return { word: normalized, ...hit };
+      return { word: normalized, partOfSpeech: hit.partOfSpeech ?? "word", ...hit };
     }
+
+    const translated = await this.offlineTranslateService.translateEnToZh(normalized);
     return {
       word: normalized,
-      chinese: "暂无词典释义（MVP mock）",
-      english: "No dictionary entry found in MVP mock",
+      chinese: translated?.trim() || normalized,
+      english: "No curated dictionary entry yet; review this word in the sentence context.",
+      partOfSpeech: "word",
       example: `Example: ${normalized} appears in context.`
     };
   }
@@ -195,3 +225,5 @@ export class ReaderService {
     });
   }
 }
+
+

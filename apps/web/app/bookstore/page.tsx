@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BookPlus, FileText } from "lucide-react";
+import { BookCover } from "@/components/common/BookCover";
 
 type StoreBook = {
   id: string;
@@ -26,7 +27,7 @@ function StoreBookCard({
 }) {
   return (
     <article className="rounded-[8px] border border-[var(--border)] bg-white/60 p-3 shadow-[0_8px_16px_rgba(61,39,18,0.04)]">
-      <img src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[6px] object-cover" />
+      <BookCover src={book.coverUrl} alt={book.title} className="aspect-[3/4] w-full rounded-[6px] object-cover" />
       <div className="mt-3 min-h-[132px]">
         <div className="flex items-center gap-2 text-[11px] text-[#87653d]">
           <span>{book.category ?? "英文阅读"}</span>

@@ -12,6 +12,15 @@ type ReadingSessionSummary = {
   wordsLearned: number;
 };
 
+type FavoriteWordBody = {
+  word: string;
+  meaning: string;
+  phonetic?: string;
+  english?: string;
+  sentence?: string;
+  chapterTitle?: string;
+};
+
 @Controller()
 export class DashboardController {
   constructor(
@@ -41,7 +50,6 @@ export class DashboardController {
     const totalSentences = sessions.reduce((sum, s) => sum + s.sentencesRead, 0);
     const checkInKeys = checkIns.map((item) => item.dateKey);
     const readingDays = new Set(sessions.filter((item) => item.durationMin > 0 || item.sentencesRead > 0).map((item) => this.toDateKey(item.date))).size;
-    const masteredWords = words.filter((word) => word.mastered).length;
 
     return {
       user: { displayName: user.displayName, avatarUrl: user.avatarUrl },
@@ -64,7 +72,7 @@ export class DashboardController {
         weeklyMinutesLabel: this.formatDuration(weeklyMinutes),
         readingDays,
         sentenceCount: totalSentences,
-        vocabularyCount: masteredWords,
+        vocabularyCount: words.length,
         streakDays: this.calculateStreak(checkInKeys),
         todayCheckedIn: checkInKeys.includes(this.toDateKey(new Date())),
         weeklyDaily
@@ -254,21 +262,47 @@ export class DashboardController {
     return { words };
   }
 
-  @Post("vocabulary")
-  async addWord(@Body() body: { word: string; meaning: string; phonetic?: string }) {
+  @Get("vocabulary/favorite/:word")
+  async getFavoriteWord(@Param("word") word: string) {
     const userId = await this.lexiService.getDemoUserId();
-    const word = await this.prisma.vocabularyWord.create({
-      data: {
-        userId,
-        word: body.word.toLowerCase(),
+    const normalizedWord = word.trim().toLowerCase();
+    const favorite = normalizedWord
+      ? await this.prisma.vocabularyWord.findUnique({
+          where: { userId_word: { userId, word: normalizedWord } }
+        })
+      : null;
+    return { favorite };
+  }
+
+  @Post("vocabulary/favorite")
+  async favoriteWord(@Body() body: FavoriteWordBody) {
+    const userId = await this.lexiService.getDemoUserId();
+    const normalizedWord = body.word.trim().toLowerCase();
+    if (!normalizedWord) {
+      return { ok: false, message: "word_required" };
+    }
+
+    const word = await this.prisma.vocabularyWord.upsert({
+      where: { userId_word: { userId, word: normalizedWord } },
+      update: {
         meaning: body.meaning,
         phonetic: body.phonetic,
+        sentence: body.sentence ?? body.english,
+        chapterTitle: body.chapterTitle
+      },
+      create: {
+        userId,
+        word: normalizedWord,
+        meaning: body.meaning,
+        phonetic: body.phonetic,
+        sentence: body.sentence ?? body.english,
+        chapterTitle: body.chapterTitle,
         familiarity: 1,
         reviewCount: 0,
         mastered: false
       }
     });
-    return { word };
+    return { ok: true, word };
   }
 
   @Patch("vocabulary/:id/mastered")
@@ -278,6 +312,12 @@ export class DashboardController {
       data: { mastered: body.mastered, reviewCount: { increment: 1 } }
     });
     return { word };
+  }
+
+  @Delete("vocabulary/:id")
+  async removeFavoriteWord(@Param("id") id: string) {
+    await this.prisma.vocabularyWord.delete({ where: { id } });
+    return { ok: true };
   }
 
   @Get("notes")

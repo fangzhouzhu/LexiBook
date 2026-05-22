@@ -44,6 +44,19 @@ export function register(payload: { username: string; password: string }) {
   return postAuth("register", payload);
 }
 
+export async function resetPassword(payload: { username: string; password: string }) {
+  const res = await fetch(`${API_BASE}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  return (await res.json()) as AuthResult;
+}
+
 export function getToken() {
   if (typeof window === "undefined") {
     return null;
