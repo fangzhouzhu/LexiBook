@@ -8,6 +8,7 @@
   "scripts": {
     "dev:web": "npm --workspace @lexibook/web run dev",
     "dev:api": "npm --workspace @lexibook/api run start:dev",
+    "db:studio": "npm --workspace @lexibook/api exec prisma studio -- --schema prisma/schema.prisma",
     "build": "npm run build --workspaces",
     "lint": "npm run lint --workspaces"
   }

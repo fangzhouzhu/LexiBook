@@ -40,6 +40,19 @@ type DailyStat = {
   words: number;
   heightPercent: number;
 };
+type CheckInSummary = {
+  id: string;
+  dateKey: string;
+  checkedAt?: string;
+  note?: string | null;
+};
+type CalendarDay = {
+  key: string;
+  day: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isChecked: boolean;
+};
 
 type HomePayload = {
   user: { displayName: string; avatarUrl: string };
@@ -74,6 +87,7 @@ type HomePayload = {
     vocabularyCount: number;
     streakDays: number;
     todayCheckedIn: boolean;
+    checkIns: CheckInSummary[];
     weeklyDaily: DailyStat[];
   };
 };
@@ -114,6 +128,39 @@ function formatHours(minutes: number) {
   return mins ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
+function toLocalDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatCalendarTitle(date: Date) {
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`;
+}
+
+function buildCheckInCalendar(monthDate: Date, checkedKeys: Set<string>): CalendarDay[] {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - firstDay.getDay());
+  const todayKey = toLocalDateKey(new Date());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const key = toLocalDateKey(date);
+    return {
+      key,
+      day: date.getDate(),
+      isCurrentMonth: date.getMonth() === month,
+      isToday: key === todayKey,
+      isChecked: checkedKeys.has(key)
+    };
+  });
+}
+
 function speakWord(word: string) {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
   const utter = new SpeechSynthesisUtterance(word);
@@ -136,6 +183,7 @@ export default function DashboardPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<DeleteCandidate | null>(null);
   const [favoriteDeleteCandidate, setFavoriteDeleteCandidate] = useState<FavoriteDeleteCandidate | null>(null);
+  const [checkInCalendarMonth, setCheckInCalendarMonth] = useState(() => new Date());
   const shelfMeasureRef = useRef<HTMLDivElement | null>(null);
   const [shelfColumns, setShelfColumns] = useState(5);
 
@@ -233,6 +281,14 @@ export default function DashboardPage() {
   }, [filteredShelfBooks, shelfColumns]);
 
   const weeklyDaily = home?.stats.weeklyDaily ?? [];
+  const checkInCalendar = useMemo(() => {
+    const checkedKeys = new Set((home?.stats.checkIns ?? []).map((item) => item.dateKey));
+    return buildCheckInCalendar(checkInCalendarMonth, checkedKeys);
+  }, [checkInCalendarMonth, home?.stats.checkIns]);
+  const checkInCountThisMonth = useMemo(
+    () => checkInCalendar.filter((day) => day.isCurrentMonth && day.isChecked).length,
+    [checkInCalendar]
+  );
 
   async function patch(url: string, body: any) {
     await fetch(`${API_BASE}${url}`, {
@@ -467,9 +523,9 @@ export default function DashboardPage() {
                   <div className="relative flex h-40 items-end gap-3">
                     {weeklyDaily.map((item) => (
                       <div key={item.key} className="group flex flex-1 flex-col items-center gap-2">
-                        <div className="flex h-32 w-full items-end rounded-full bg-[rgba(122,84,44,0.06)] px-1 pb-1">
+                        <div className="flex h-32 w-full items-end rounded-[10px] bg-[rgba(122,84,44,0.06)] px-0.5 pb-0.5">
                           <div
-                            className="relative w-full rounded-full bg-[linear-gradient(180deg,#e4c08d_0%,#bd7d35_72%,#9c6228_100%)] shadow-[0_10px_18px_rgba(156,98,40,0.22)] transition duration-200 group-hover:brightness-105"
+                            className="relative w-full rounded-[8px] bg-[linear-gradient(180deg,#e4c08d_0%,#bd7d35_72%,#9c6228_100%)] shadow-[0_10px_18px_rgba(156,98,40,0.22)] transition duration-200 group-hover:brightness-105"
                             style={{ height: `${item.heightPercent}%` }}
                           >
                             <span className="absolute -top-7 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded-full bg-[#3b2a1c] px-2 py-1 text-[11px] text-white shadow-lg group-hover:block">
@@ -481,6 +537,71 @@ export default function DashboardPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              <div className="mt-7 rounded-[16px] border border-[rgba(151,118,83,0.16)] bg-[linear-gradient(180deg,rgba(255,253,249,0.78)_0%,rgba(250,244,235,0.58)_100%)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[15px] font-semibold text-[#4d3a28]">签到日历</p>
+                    <p className="mt-1 text-[13px] text-[#8b7764]">本月已签到 {checkInCountThisMonth} 天</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(151,118,83,0.18)] bg-white/60 text-[#8c6742]"
+                      onClick={() =>
+                        setCheckInCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))
+                      }
+                      aria-label="查看上个月"
+                      title="查看上个月"
+                    >
+                      <ChevronLeft size={15} />
+                    </button>
+                    <span className="min-w-[92px] text-center text-[13px] font-semibold text-[#6c5645]">
+                      {formatCalendarTitle(checkInCalendarMonth)}
+                    </span>
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(151,118,83,0.18)] bg-white/60 text-[#8c6742]"
+                      onClick={() =>
+                        setCheckInCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))
+                      }
+                      aria-label="查看下个月"
+                      title="查看下个月"
+                    >
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-[#9a846b]">
+                  {["日", "一", "二", "三", "四", "五", "六"].map((label) => (
+                    <span key={label} className="py-1">
+                      {label}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-1 grid grid-cols-7 gap-1">
+                  {checkInCalendar.map((day) => (
+                    <button
+                      key={day.key}
+                      className={`relative flex aspect-square min-h-9 items-center justify-center rounded-[8px] border text-[12px] transition ${
+                        day.isChecked
+                          ? "border-[rgba(156,106,47,0.24)] bg-[linear-gradient(135deg,#9c6a2f_0%,#b57a39_100%)] font-semibold text-white shadow-[0_8px_16px_rgba(156,98,40,0.14)]"
+                          : day.isToday
+                            ? "border-[rgba(156,106,47,0.34)] bg-[rgba(255,250,243,0.92)] font-semibold text-[#8a5f2e]"
+                            : "border-transparent bg-white/42 text-[#7b6957]"
+                      } ${day.isCurrentMonth ? "" : "opacity-35"} hover:border-[rgba(156,106,47,0.24)]`}
+                      onClick={() => {
+                        if (day.isToday && !day.isChecked) void checkInToday();
+                      }}
+                      aria-label={`${day.key}${day.isChecked ? " 已签到" : ""}`}
+                      title={day.isChecked ? "已签到" : day.isToday ? "签到今天" : day.key}
+                    >
+                      {day.day}
+                      {day.isToday ? (
+                        <span className={`absolute bottom-1 h-1 w-1 rounded-full ${day.isChecked ? "bg-white" : "bg-[#9c6a2f]"}`} />
+                      ) : null}
+                    </button>
+                  ))}
                 </div>
               </div>
 

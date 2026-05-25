@@ -41,7 +41,7 @@ export class DashboardController {
       this.prisma.vocabularyWord.findMany({ where: { userId } }),
       this.prisma.note.findMany({ where: { userId }, orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }] }),
       this.prisma.readingSession.findMany({ where: { userId }, orderBy: { date: "asc" } }),
-      this.prisma.readingCheckIn.findMany({ where: { userId }, orderBy: { checkedAt: "desc" }, take: 60 })
+      this.prisma.readingCheckIn.findMany({ where: { userId }, orderBy: { checkedAt: "desc" }, take: 180 })
     ]);
 
     const currentBook = books.find((b) => b.status === "reading") ?? books[0] ?? null;
@@ -75,6 +75,7 @@ export class DashboardController {
         vocabularyCount: words.length,
         streakDays: this.calculateStreak(checkInKeys),
         todayCheckedIn: checkInKeys.includes(this.toDateKey(new Date())),
+        checkIns,
         weeklyDaily
       },
       notesPreview: notes.slice(0, 3)
